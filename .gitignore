@@ -43,4 +43,14 @@ Packages/packages-lock.json
 *.unitypackage
 
 # Otros
-/[Aa]ssets/AssetStoreTools* 
+/[Aa]ssets/AssetStoreTools*
+
+# Claude Code sesiones (datos locales, no del proyecto)
+.claude/
+
+# Preferencias por máquina
+Assets/UserChoices.choices
+Assets/UserChoices.choices.meta
+
+# MPPM config (específico por máquina)
+ProjectSettings/VirtualProjectsConfig.json

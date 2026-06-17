@@ -1,77 +1,111 @@
-using System.Collections;
-using System.Collections.Generic;
+using Unity.Netcode;
 using UnityEngine;
 using TMPro;
 
-public class ActionPlayerManager : MonoBehaviour
+// Represents one player's state: body color, weapon color, score.
+// Each player owns their own object; only they can change their colors.
+// Score is written by the server after each round.
+public class ActionPlayerManager : NetworkBehaviour
 {
+    public enum ColorOption { Red = 0, Blue = 1, Green = 2, Yellow = 3 }
 
-    public enum ColorOption
+    [Header("Visuals — assign in prefab")]
+    [SerializeField] private Renderer playerRenderer;
+    [SerializeField] private Renderer weapon;
+    [SerializeField] private TextMeshPro scoreText;
+
+    // Owner writes; everyone reads — player controls their own colors
+    public NetworkVariable<int> bodyColor = new NetworkVariable<int>(
+        0,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Owner);
+
+    public NetworkVariable<int> weaponColor = new NetworkVariable<int>(
+        0,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Owner);
+
+    // Server writes; everyone reads — server is authoritative on score
+    public NetworkVariable<int> score = new NetworkVariable<int>(
+        0,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+    // Server assigns slot 1-4 so the win screen can show "Jugador 2 ganó"
+    public NetworkVariable<int> playerSlot = new NetworkVariable<int>(
+        0,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+    private static readonly Color[] ColorMap =
     {
-        Red,
-        Blue,
-        Green,
-        Yellow
-    }
+        Color.red,
+        Color.blue,
+        Color.green,
+        Color.yellow
+    };
 
-    [Header("Player Settings")]
-    [SerializeField] private ColorOption colorOption;
-    [SerializeField] private ColorOption colorWeapon;
-
-    public ActionPlayerManager enemy;
-    public Renderer playerRenderer;
-    public Renderer weapon;
-    public TMPro.TextMeshPro scoreText;
-    private int score = 0;
-
-    private void Start()
+    public override void OnNetworkSpawn()
     {
-        ActionPlayer((int)colorOption, 1);
-    }
+        // React to network changes and update visuals on all devices
+        bodyColor.OnValueChanged += (_, v) => ApplyBodyColor(v);
+        weaponColor.OnValueChanged += (_, v) => ApplyWeaponColor(v);
+        score.OnValueChanged += (_, v) => UpdateScoreText(v);
 
-    private Color GetColorFromOption(ColorOption option)
-    {
-        switch (option)
+        // Late-join snap: apply current values immediately
+        ApplyBodyColor(bodyColor.Value);
+        ApplyWeaponColor(weaponColor.Value);
+        UpdateScoreText(score.Value);
+
+        if (IsOwner)
         {
-            case ColorOption.Red:
-                return Color.red;
-            case ColorOption.Blue:
-                return Color.blue;
-            case ColorOption.Green:
-                return Color.green;
-            case ColorOption.Yellow:
-                return Color.yellow;
-            default:
-                return Color.yellow;
+            // Random starting colors — owner writes directly to their NetworkVariables
+            bodyColor.Value = Random.Range(0, 4);
+            weaponColor.Value = Random.Range(0, 4);
+
+            // FindFirstObjectByType is MPPM-safe (scoped per virtual player)
+            Object.FindFirstObjectByType<LobbyUIManager>()?.SetLocalPlayer(this);
         }
+
+        if (IsServer)
+            GameManager.Instance?.RegisterPlayer(this);
     }
 
-    public void ChangeColor(int colorToChange)
+    public override void OnNetworkDespawn()
     {
-        colorOption = (ColorOption)colorToChange;
-        playerRenderer.material.color = GetColorFromOption((ColorOption)colorToChange);
+        if (IsServer)
+            GameManager.Instance?.UnregisterPlayer(this);
     }
 
-    public void ActionPlayer(int colorToChange, int targetColor)
+    // Called by LobbyUIManager from the 4 body-color buttons
+    public void ChangeColor(int colorIndex)
     {
-        ChangeColor(colorToChange);
-        AttackColor(targetColor);
+        if (!IsOwner) return;
+        bodyColor.Value = colorIndex;
     }
 
-    // M�todo para realizar un ataque al jugador objetivo
-    public void AttackColor(int targetColor)
+    // Called by LobbyUIManager from the 4 weapon-color buttons
+    public void AttackColor(int colorIndex)
     {
-
-        Color waepomColor = GetColorFromOption((ColorOption)targetColor);
-        colorWeapon = (ColorOption)targetColor;
-        weapon.material.color = waepomColor;
+        if (!IsOwner) return;
+        weaponColor.Value = colorIndex;
     }
-    public void Action()
+
+    private void ApplyBodyColor(int index)
     {
-        if (enemy.colorOption == colorWeapon)
-        {
-            score++;
-            scoreText.text = score.ToString();
-        }
+        if (playerRenderer != null)
+            playerRenderer.material.color = ColorMap[Mathf.Clamp(index, 0, 3)];
+    }
+
+    private void ApplyWeaponColor(int index)
+    {
+        if (weapon != null)
+            weapon.material.color = ColorMap[Mathf.Clamp(index, 0, 3)];
+    }
+
+    private void UpdateScoreText(int value)
+    {
+        if (scoreText != null)
+            scoreText.text = value.ToString();
     }
 }
