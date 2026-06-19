@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using TMPro;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -16,6 +17,12 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] private GameObject createPanel;
     [SerializeField] private GameObject waitPanel;
     [SerializeField] private GameObject winPanel;
+    [SerializeField] private GameObject namePanel;
+
+    [Header("Name entry — shown once if no name is saved in PlayerPrefs")]
+    [SerializeField] private TMP_InputField nameInput;
+
+    private const string PlayerNameKey = "PlayerName";
 
     [Header("Wait Room")]
     [SerializeField] private TextMeshProUGUI joinCodeDisplay;
@@ -28,6 +35,8 @@ public class LobbyUIManager : MonoBehaviour
     [Header("Win Screen")]
     [SerializeField] private TextMeshProUGUI winnerText;
     [SerializeField] private Button backToMenuButton;
+    [SerializeField] private Button playAgainButton;
+    [SerializeField] private GameObject waitHostText;
 
     [Header("Error feedback")]
     [SerializeField] private TextMeshProUGUI errorText;
@@ -46,7 +55,8 @@ public class LobbyUIManager : MonoBehaviour
 
     private void Start()
     {
-        ShowPanel(menuPanel);
+        bool hasName = !string.IsNullOrWhiteSpace(PlayerPrefs.GetString(PlayerNameKey, ""));
+        ShowPanel(hasName ? menuPanel : namePanel);
         if (backToMenuButton != null) backToMenuButton.onClick.AddListener(OnBackToMenu);
         if (errorText != null) errorText.gameObject.SetActive(false);
 
@@ -122,6 +132,24 @@ public class LobbyUIManager : MonoBehaviour
     public void ShowMenuPanel()   => ShowPanel(menuPanel);
     public void ShowCreatePanel() => ShowPanel(createPanel);
 
+    // Called by the name panel's "Confirmar" button — only shown once, when
+    // PlayerPrefs has no saved name yet.
+    public void OnConfirmNameButton()
+    {
+        string name = nameInput != null ? nameInput.text.Trim() : string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            ShowError("Ingresa un nombre.");
+            return;
+        }
+        // Must match the clamp in ActionPlayerManager (FixedString32Bytes only holds
+        // ~28 UTF-8 bytes) so the saved name and the one actually shown in-game match.
+        if (name.Length > 16) name = name.Substring(0, 16);
+        PlayerPrefs.SetString(PlayerNameKey, name);
+        PlayerPrefs.Save();
+        ShowPanel(menuPanel);
+    }
+
     public void SelectMaxPlayers(int count)
     {
         selectedMaxPlayers = count;
@@ -178,18 +206,26 @@ public class LobbyUIManager : MonoBehaviour
         createPanel.SetActive(false);
         waitPanel.SetActive(false);
         winPanel.SetActive(false);
+        namePanel.SetActive(false);
     }
 
-    public void ShowWinners(int[] winnerSlots)
+    // message comes fully formatted from GameManager (e.g. "¡Ana y Luis ganaron!") —
+    // NGO RPCs can't serialize string[], so the pluralization happens server-side.
+    public void ShowWinners(string message)
     {
         winPanel.SetActive(true);
-        if (winnerSlots.Length == 1)
-            winnerText.text = $"¡Jugador {winnerSlots[0]} ganó!";
-        else
-        {
-            string names = string.Join(" y ", Array.ConvertAll(winnerSlots, s => $"Jugador {s}"));
-            winnerText.text = $"¡{names} ganaron!";
-        }
+        winnerText.text = message;
+
+        // Only the host can restart — same connected roster, no reconnection needed
+        bool isHost = NetworkManager.Singleton != null && NetworkManager.Singleton.IsHost;
+        if (playAgainButton != null) playAgainButton.gameObject.SetActive(isHost);
+        if (waitHostText != null) waitHostText.SetActive(!isHost);
+    }
+
+    // Called by the "Jugar de nuevo" button — host only (button is hidden for guests)
+    public void OnPlayAgainButton()
+    {
+        UnityEngine.Object.FindFirstObjectByType<GameManager>()?.RestartGame();
     }
 
     // ─── Internal helpers ─────────────────────────────────────────────────────
@@ -216,6 +252,7 @@ public class LobbyUIManager : MonoBehaviour
         createPanel.SetActive(target == createPanel);
         waitPanel.SetActive(target == waitPanel);
         winPanel.SetActive(target == winPanel);
+        namePanel.SetActive(target == namePanel);
         if (errorText != null) errorText.gameObject.SetActive(false);
     }
 
