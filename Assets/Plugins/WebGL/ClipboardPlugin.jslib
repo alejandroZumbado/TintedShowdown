@@ -6,7 +6,9 @@ mergeInto(LibraryManager.library, {
   CopyToClipboard: function (textPtr) {
     var text = UTF8ToString(textPtr);
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(function (err) {
+      navigator.clipboard.writeText(text).then(function () {
+        console.log('[ClipboardPlugin] wrote to clipboard: ' + text);
+      }).catch(function (err) {
         console.warn('[ClipboardPlugin] navigator.clipboard.writeText failed:', err);
       });
     } else {

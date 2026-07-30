@@ -126,8 +126,10 @@ public class LobbyUIManager : MonoBehaviour
 
     public void OnCopyCodeButton()
     {
+        Debug.Log($"[LobbyUI] OnCopyCodeButton joinCode={_joinCode}");
         if (string.IsNullOrEmpty(_joinCode)) return;
 #if UNITY_WEBGL && !UNITY_EDITOR
+        Debug.Log("[LobbyUI] Calling CopyToClipboard (WebGL)");
         CopyToClipboard(_joinCode);
 #else
         GUIUtility.systemCopyBuffer = _joinCode;
