@@ -3,12 +3,11 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
-using Unity.Networking.Transport;
 using Unity.Networking.Transport.Relay;
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using Unity.Services.Relay;
-using Unity.Services.Relay.Models; // Allocation, JoinAllocation, RelayServerEndpoint
+using Unity.Services.Relay.Models; // Allocation, JoinAllocation, RelayServerEndpoint, AllocationUtils.ToRelayServerData
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -167,68 +166,43 @@ public class SessionNetworkManager : MonoBehaviour
 
     // ─── Relay protocol selection ─────────────────────────────────────────────
 
-    // Selects the right endpoint by port — avoids relying on NetworkOptions enum values
-    // which differ between relay package versions.
-    // Unity Relay standard ports: UDP = 7777, DTLS/WSS = 443, WS = 80
-    private static (NetworkEndpoint endpoint, bool isSecure) PickEndpoint(IReadOnlyList<RelayServerEndpoint> endpoints)
+    // Picks the connectionType string ("udp"/"dtls"/"wss") — the ONLY stable way to select
+    // a Relay endpoint. Two things that look tempting instead both broke in production:
+    //   - ep.Network (RelayServerEndpoint.NetworkOptions = Udp/Tcp) is the IP transport
+    //     layer, not the secure/WebSocket distinction — a "Tcp" entry can BE the wss
+    //     endpoint, so you can't tell wss from plain tcp by comparing this enum.
+    //   - ep.Port used to reliably be 7777 (udp) / 443 (wss/dtls) — real allocations now
+    //     hand out dynamic ports per endpoint, so matching by port silently falls through
+    //     to "first available" (which picked a raw UDP endpoint on WebGL — browsers can't
+    //     open a socket to that at all, only WebSocket — see [[tech_webgl_github_pages]]).
+    private static string PreferredConnectionType()
     {
-        // Log all options so we can diagnose if the wrong one is chosen
-        foreach (var ep in endpoints)
-            Debug.Log($"[SNM]   available: Network={ep.Network} {ep.Host}:{ep.Port}");
-
-        RelayServerEndpoint chosen = null;
-        bool isSecure;
-
         if (Application.platform == RuntimePlatform.WebGLPlayer)
-        {
-            // WebGL must use WebSockets (WSS, port 443)
-            foreach (var ep in endpoints) if (ep.Port == 443) { chosen = ep; break; }
-            isSecure = true;
-        }
-        else if (Application.isEditor)
-        {
-            // Editor: use plain UDP (port 7777) — DTLS handshake is unreliable in the Editor
-            foreach (var ep in endpoints) if (ep.Port == 7777) { chosen = ep; break; }
-            isSecure = false;
-        }
-        else
-        {
-            // Standalone builds: use DTLS (port 443, encrypted)
-            foreach (var ep in endpoints) if (ep.Port == 443) { chosen = ep; break; }
-            isSecure = true;
-        }
-
-        if (chosen == null)
-        {
-            Debug.LogWarning("[SNM] Preferred endpoint port not found, using first available");
-            chosen   = endpoints[0];
-            isSecure = false;
-        }
-
-        Debug.Log($"[SNM] Selected: {chosen.Network} {chosen.Host}:{chosen.Port} secure={isSecure}");
-        return (NetworkEndpoint.Parse(chosen.Host, (ushort)chosen.Port), isSecure);
+            return RelayServerEndpoint.ConnectionTypeWss; // browsers can only open WebSocket connections
+        if (Application.isEditor)
+            return RelayServerEndpoint.ConnectionTypeUdp; // DTLS handshake is unreliable in the Editor — see [[tech_relay_endpoint]]
+        return RelayServerEndpoint.ConnectionTypeDtls;    // standalone builds: encrypted UDP
     }
 
     // ─── Relay data builders ──────────────────────────────────────────────────
 
+    // AllocationUtils.ToRelayServerData (official Unity Services helper) builds the
+    // RelayServerData directly from the connectionType string, including setting the
+    // IsWebSocket flag — the manual NetworkEndpoint.Parse(host, port) approach used before
+    // silently failed for wss endpoints anyway, since Parse expects a raw IP, not the
+    // hostname (e.g. "...relay.uf.unity3d.com") wss endpoints are actually served from.
     private static RelayServerData BuildHostRelayData(Allocation a)
     {
-        var (endpoint, isSecure) = PickEndpoint(a.ServerEndpoints);
-        var id   = RelayAllocationId.FromByteArray(a.AllocationIdBytes);
-        var conn = RelayConnectionData.FromByteArray(a.ConnectionData);
-        var key  = RelayHMACKey.FromByteArray(a.Key);
-        // Host passes its own ConnectionData twice (no separate host connection data for host)
-        return new RelayServerData(ref endpoint, 0, ref id, ref conn, ref conn, ref key, isSecure);
+        string connType = PreferredConnectionType();
+        Debug.Log($"[SNM] Using connectionType={connType}");
+        return a.ToRelayServerData(connType);
     }
 
     private static RelayServerData BuildClientRelayData(JoinAllocation a)
     {
-        var (endpoint, isSecure) = PickEndpoint(a.ServerEndpoints);
-        var id   = RelayAllocationId.FromByteArray(a.AllocationIdBytes);
-        var conn = RelayConnectionData.FromByteArray(a.ConnectionData);
-        var host = RelayConnectionData.FromByteArray(a.HostConnectionData);
-        var key  = RelayHMACKey.FromByteArray(a.Key);
-        return new RelayServerData(ref endpoint, 0, ref id, ref conn, ref host, ref key, isSecure);
+        string connType = PreferredConnectionType();
+        Debug.Log($"[SNM] Using connectionType={connType}");
+        return a.ToRelayServerData(connType);
     }
 
     // ─── Internal helpers ─────────────────────────────────────────────────────
@@ -252,6 +226,6 @@ public class SessionNetworkManager : MonoBehaviour
     private static void LogEndpoints(IReadOnlyList<RelayServerEndpoint> endpoints)
     {
         foreach (var ep in endpoints)
-            Debug.Log($"[SNM]   endpoint: {ep.Network} {ep.Host}:{ep.Port}");
+            Debug.Log($"[SNM]   endpoint: connectionType={ep.ConnectionType} secure={ep.Secure} {ep.Host}:{ep.Port}");
     }
 }
