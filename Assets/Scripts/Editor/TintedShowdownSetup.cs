@@ -2,6 +2,7 @@
 // Automates scene setup, prefab config, and build settings.
 
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -31,6 +32,8 @@ public static class TintedShowdownSetup
             "Continuar", "Cancelar")) return;
 
         SetupMobileLandscape();
+        SetupAndroidPlayerSettings();
+        SetupWebGLPlayerSettings();
         SetupPlayerPrefab();
         SetupCanvasPrefab();
         SetupGameMenuScene();
@@ -137,6 +140,71 @@ public static class TintedShowdownSetup
         }
     }
 
+    // ─── Android build settings ────────────────────────────────────────────────
+
+    private const string DefaultAndroidPackageName = "com.tintedshowdown.game";
+
+    private static void SetupAndroidPlayerSettings()
+    {
+        // Unity refuses to build for Android at all with no applicationIdentifier set.
+        // This is a placeholder — package names are immutable once published to Google
+        // Play, so swap it for your own domain/company before a real release build.
+        //
+        // GetApplicationIdentifier never actually returns empty — if nothing was ever set,
+        // it synthesizes "com.DefaultCompany.<ProductName>" on the fly without persisting
+        // it, so an IsNullOrEmpty check alone never catches the unset case. Checking for
+        // the literal "DefaultCompany" sentinel does.
+        string currentId = PlayerSettings.GetApplicationIdentifier(NamedBuildTarget.Android);
+        if (string.IsNullOrEmpty(currentId) || currentId.Contains("DefaultCompany"))
+        {
+            PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, DefaultAndroidPackageName);
+            Debug.LogWarning($"[Setup] Android applicationIdentifier estaba vacío — seteado a placeholder '{DefaultAndroidPackageName}'. Cambialo antes de publicar.");
+        }
+
+        // Mono can't ship a 64-bit slice on Android, and Google Play has required 64-bit
+        // since 2019 — IL2CPP is mandatory for a real release build.
+        if (PlayerSettings.GetScriptingBackend(NamedBuildTarget.Android) != ScriptingImplementation.IL2CPP)
+        {
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
+            Debug.Log("[Setup] Android scripting backend: Mono → IL2CPP");
+        }
+
+        // The project was set to ARMv7-only (no 64-bit slice) — Google Play rejects that.
+        // ARM64 alone covers effectively every device still receiving OS updates.
+        if (PlayerSettings.Android.targetArchitectures != AndroidArchitecture.ARM64)
+        {
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            Debug.Log("[Setup] Android target architecture: ARMv7 → ARM64");
+        }
+    }
+
+    // ─── WebGL build settings ───────────────────────────────────────────────────
+
+    private const string WebGLTemplateName = "PROJECT:TintedShowdown";
+
+    // Public: also called directly by WebGLBuildScript.Build() for CLI builds, which
+    // can't go through the interactive SetupAll() dialog in batchmode.
+    public static void SetupWebGLPlayerSettings()
+    {
+        // GitHub Pages (and most static hosts) never send a Content-Encoding: gzip/br
+        // header for arbitrary files, so a Gzip/Brotli-compressed WebGL build silently
+        // fails to load once hosted there — it works fine locally only because
+        // `python -m http.server`-style local servers happen to set that header.
+        // Decompression Fallback packs a JS-side decompressor into the loader instead,
+        // so the build works regardless of what headers the host sends.
+        if (!PlayerSettings.WebGL.decompressionFallback)
+        {
+            PlayerSettings.WebGL.decompressionFallback = true;
+            Debug.Log("[Setup] WebGL Decompression Fallback: OFF → ON (necesario para hostear en GitHub Pages)");
+        }
+
+        if (PlayerSettings.WebGL.template != WebGLTemplateName)
+        {
+            PlayerSettings.WebGL.template = WebGLTemplateName;
+            Debug.Log($"[Setup] WebGL template: {WebGLTemplateName}");
+        }
+    }
+
     // ─── Player.prefab ────────────────────────────────────────────────────────
 
     private static void SetupPlayerPrefab()
@@ -166,8 +234,30 @@ public static class TintedShowdownSetup
             var so = new SerializedObject(apm);
             so.FindProperty("playerCamera").objectReferenceValue = playerCamera;
             so.FindProperty("audioSource").objectReferenceValue = audioSource;
+            so.FindProperty("flatMaterialTemplate").objectReferenceValue = EnsureFlatPaintMaterial();
             so.ApplyModifiedProperties();
         }
+    }
+
+    private const string FlatPaintMaterialPath = "Assets/Materials/FlatPaint.mat";
+
+    // A real Material asset, not Shader.Find("Unlit/Color") — a shader only looked up by
+    // string in code gets stripped from standalone builds when nothing else references it,
+    // so Shader.Find silently returns null outside the Editor (confirmed crash: see
+    // ActionPlayerManager.CreatePaintMaterials throwing ArgumentNullException in a PC
+    // build). Creating this asset once gives the build pipeline a real reference to keep.
+    private static Material EnsureFlatPaintMaterial()
+    {
+        var existing = AssetDatabase.LoadAssetAtPath<Material>(FlatPaintMaterialPath);
+        if (existing != null) return existing;
+
+        var shader = Shader.Find("Unlit/Color");
+        if (shader == null) { Debug.LogError("[Setup] Shader 'Unlit/Color' not found"); return null; }
+
+        var mat = new Material(shader) { name = "FlatPaint" };
+        AssetDatabase.CreateAsset(mat, FlatPaintMaterialPath);
+        Debug.Log("[Setup] Created Assets/Materials/FlatPaint.mat");
+        return mat;
     }
 
     // Per-player camera, child of the player — disabled by default, ActionPlayerManager
@@ -402,6 +492,10 @@ public static class TintedShowdownSetup
         // on its own without touching (or requiring you to delete) an existing LobbyCanvas.
         EnsureNamePanel(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
 
+        // Added after the rest of the lobby UI already existed in some projects — same
+        // pattern as EnsureNamePanel, only adds the toast if it's missing.
+        EnsureErrorToast(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
+
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("[Setup] GameMenu.unity saved");
@@ -425,7 +519,6 @@ public static class TintedShowdownSetup
         MakeButton(menuPanel, "BtnShowCreate", "Crear Sala",  new Vector2(0,  95));
         var joinInput = MakeInputField(menuPanel, "JoinCodeInput", "Contraseña de sala...", new Vector2(0, 0));
         MakeButton(menuPanel, "BtnJoinConfirm", "Entrar",     new Vector2(0, -95));
-        var errorText = MakeText(menuPanel, "ErrorText", "", new Vector2(0, -180), 24, new Color32(255, 80, 80, 255));
 
         // ── CreatePanel ── (wider spread between the 3 buttons — landscape has room)
         MakeText(createPanel, "Title", "¿Cuántos jugadores?", new Vector2(0, 150), 32, Color.white);
@@ -488,7 +581,6 @@ public static class TintedShowdownSetup
         so.FindProperty("backToMenuButton").objectReferenceValue = backBtn.GetComponent<Button>();
         so.FindProperty("playAgainButton").objectReferenceValue  = playAgainBtn.GetComponent<Button>();
         so.FindProperty("waitHostText").objectReferenceValue     = waitHostText.gameObject;
-        so.FindProperty("errorText").objectReferenceValue        = errorText;
         so.ApplyModifiedProperties();
 
         Debug.Log("[Setup] LobbyCanvas created");
@@ -522,6 +614,76 @@ public static class TintedShowdownSetup
         Debug.Log("[Setup] NamePanel added to LobbyCanvas");
     }
 
+    // Top-level toast (sibling of the panels, not nested in one) so it stays visible no
+    // matter which panel is active — errorText used to be a child of MenuPanel only, so
+    // errors raised while NamePanel/CreatePanel were showing never rendered.
+    private static void EnsureErrorToast(GameObject canvasGO, LobbyUIManager lobbyUI)
+    {
+        var existing = canvasGO.transform.Find("ErrorToast");
+        // A previous buggy version of this method put the Image and the TextMeshProUGUI
+        // on the SAME GameObject. Two Graphic components sharing one CanvasRenderer is
+        // invalid — only one of them ends up actually rendering, and which one is
+        // platform-dependent, which is how a small toast turned into a full-screen red
+        // block on device. Detect that broken shape (no "Label" child) and rebuild it,
+        // instead of trusting existence-by-name like the old check did.
+        if (existing != null && existing.Find("Label") != null)
+        {
+            Debug.Log("[Setup] ErrorToast already exists — leaving it as-is");
+            return;
+        }
+        if (existing != null)
+        {
+            Debug.LogWarning("[Setup] Found a broken ErrorToast (Image+Text sharing one GameObject) — rebuilding it");
+            Object.DestroyImmediate(existing.gameObject);
+        }
+
+        // Remove the old MenuPanel-only ErrorText left over from before the toast existed —
+        // it's dead weight now that errorText points at the new top-level toast.
+        var legacy = canvasGO.transform.Find("MenuPanel/ErrorText");
+        if (legacy != null) Object.DestroyImmediate(legacy.gameObject);
+
+        // Root only holds the background Image + CanvasRenderer. Its active state is what
+        // LobbyUIManager toggles to show/hide the whole toast (see errorToastRoot).
+        var toast = new GameObject("ErrorToast");
+        toast.transform.SetParent(canvasGO.transform, false);
+        toast.transform.SetAsLastSibling(); // render above every panel
+
+        var bg = toast.AddComponent<Image>();
+        bg.color = new Color32(50, 20, 20, 235);
+        bg.raycastTarget = false; // never blocks taps on whatever is underneath
+        var rt = toast.GetComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0f);
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.sizeDelta        = new Vector2(720, 90);
+        rt.anchoredPosition  = new Vector2(0, 60); // near the bottom edge, clear of panel content
+
+        // Text lives on its own child GameObject ("Label") so it gets its own
+        // CanvasRenderer instead of fighting the background Image for the one on toast.
+        var labelGO = new GameObject("Label");
+        labelGO.transform.SetParent(toast.transform, false);
+        var labelRt = labelGO.GetComponent<RectTransform>();
+        labelRt.anchorMin = Vector2.zero;
+        labelRt.anchorMax = Vector2.one;
+        labelRt.sizeDelta = Vector2.zero;
+        labelRt.anchoredPosition = Vector2.zero;
+
+        var errorText = labelGO.AddComponent<TextMeshProUGUI>();
+        errorText.fontSize  = 26;
+        errorText.color     = new Color32(255, 140, 140, 255);
+        errorText.alignment = TextAlignmentOptions.Center;
+        errorText.margin    = new Vector4(20, 4, 20, 4);
+        errorText.raycastTarget = false;
+
+        toast.SetActive(false);
+
+        var so = new SerializedObject(lobbyUI);
+        so.FindProperty("errorToastRoot").objectReferenceValue = toast;
+        so.FindProperty("errorText").objectReferenceValue = errorText;
+        so.ApplyModifiedProperties();
+
+        Debug.Log("[Setup] ErrorToast added to LobbyCanvas");
+    }
+
     // ─── Arena.unity ──────────────────────────────────────────────────────────
 
     private static void SetupArenaScene()
@@ -538,6 +700,15 @@ public static class TintedShowdownSetup
         var gmGO = GameObject.Find("GameManager") ?? new GameObject("GameManager");
         gmGO.GetOrAdd<NetworkObject>();
         var gm = gmGO.GetOrAdd<GameManager>();
+
+        // EnvironmentManager — random Day/Night/Blend skybox preset, synced to all clients.
+        // "environment" Transform and each preset's rotation are NOT set here — those
+        // depend on where you place the sun/skybox rig in this specific scene, so you set
+        // them by hand in the Inspector. Only the values that must match the source demo
+        // scenes exactly (skybox material, light color/intensity, fog) are auto-filled.
+        var envGO = FindOrCreate("EnvironmentManager");
+        envGO.GetOrAdd<NetworkObject>();
+        EnsureEnvironmentPresets(envGO.GetOrAdd<EnvironmentPresetManager>());
 
         // Spawn points in a circle — players face the center
         var spawnRoot = FindOrCreate("SpawnPoints");
@@ -594,6 +765,62 @@ public static class TintedShowdownSetup
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("[Setup] Arena.unity saved");
+    }
+
+    // Values lifted directly from Demo Day.unity / Demo Night.unity / Demo Blend.unity
+    // (RenderSettings + the "Directional Light" in each) so the in-game presets match
+    // the source scenes exactly. Rotation is excluded on purpose — see EnsureEnvironmentPresets.
+    private static readonly (string name, string matPath, Color lightColor, float lightIntensity,
+        bool fogEnabled, Color fogColor, float fogStart, float fogEnd, float ambientIntensity)[]
+        EnvironmentPresetData =
+    {
+        ("Day",
+         "Assets/BOXOPHOBIC/Skybox Cubemap Extended/Demo/Materials/Skybox Cubemap Extended Day.mat",
+         new Color(1f, 0.5917582f, 0.21226418f), 1.5f,
+         true, new Color(1f, 0.43005908f, 0.24313724f), 0f, 70f, 0.95f),
+
+        ("Night",
+         "Assets/BOXOPHOBIC/Skybox Cubemap Extended/Demo/Materials/Skybox Cubemap Extended Night.mat",
+         new Color(0.26379493f, 0.40115762f, 0.9811321f), 1.2f,
+         true, new Color(0.7830189f, 0.21052866f, 0.5883721f), -10f, 100f, 1f),
+
+        ("Blend",
+         "Assets/BOXOPHOBIC/Skybox Cubemap Extended/Demo/Materials/Skybox Cubemap Extended Blend.mat",
+         new Color(1f, 0.7654179f, 0.5990566f), 1f,
+         false, new Color(0.4762816f, 0.6578769f, 0.7264151f), 0f, 300f, 1f),
+    };
+
+    private static void EnsureEnvironmentPresets(EnvironmentPresetManager mgr)
+    {
+        var so = new SerializedObject(mgr);
+        var presetsProp = so.FindProperty("presets");
+        presetsProp.arraySize = EnvironmentPresetData.Length;
+
+        for (int i = 0; i < EnvironmentPresetData.Length; i++)
+        {
+            var data    = EnvironmentPresetData[i];
+            var element = presetsProp.GetArrayElementAtIndex(i);
+            var matProp = element.FindPropertyRelative("skyboxMaterial");
+
+            // Only fill a preset that's never been configured — re-running Setup All
+            // must not clobber a rotation you already tuned by hand.
+            if (matProp.objectReferenceValue != null) continue;
+
+            matProp.objectReferenceValue = AssetDatabase.LoadAssetAtPath<Material>(data.matPath);
+            element.FindPropertyRelative("name").stringValue           = data.name;
+            element.FindPropertyRelative("lightColor").colorValue      = data.lightColor;
+            element.FindPropertyRelative("lightIntensity").floatValue  = data.lightIntensity;
+            element.FindPropertyRelative("fogEnabled").boolValue       = data.fogEnabled;
+            element.FindPropertyRelative("fogColor").colorValue        = data.fogColor;
+            element.FindPropertyRelative("linearFogStart").floatValue  = data.fogStart;
+            element.FindPropertyRelative("linearFogEnd").floatValue    = data.fogEnd;
+            element.FindPropertyRelative("ambientIntensity").floatValue = data.ambientIntensity;
+        }
+
+        so.ApplyModifiedProperties();
+        Debug.Log("[Setup] Environment presets filled (Day/Night/Blend). Pending manual steps: " +
+                  "assign 'environment' (Transform) on EnvironmentManager, and set each preset's " +
+                  "rotation by eye in the Inspector.");
     }
 
     private static void EnsureCanvasInScene()

@@ -76,8 +76,10 @@ public class SessionNetworkManager : MonoBehaviour
         }
         catch (Exception e)
         {
+            // Full exception goes to the console for debugging — the player only needs
+            // a short, friendly message, not a wall of stack-trace-looking text.
             Debug.LogError($"[SNM] CreateRoomAsync: {e}");
-            OnError?.Invoke($"Error al crear sala: {e.Message}");
+            OnError?.Invoke("No se pudo crear la sala. Probá de nuevo.");
         }
     }
 
@@ -108,7 +110,7 @@ public class SessionNetworkManager : MonoBehaviour
         catch (Exception e)
         {
             Debug.LogError($"[SNM] JoinRoomAsync: {e}");
-            OnError?.Invoke($"Código inválido o sala llena: {e.Message}");
+            OnError?.Invoke("Sala no encontrada o llena. Revisá el código.");
         }
     }
 

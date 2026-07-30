@@ -96,6 +96,15 @@ GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
 - Scene 0: `GameMenu`
 - Scene 1: `1v1`
 
+### `EnvironmentManager` (Arena.unity) — PENDIENTE
+`EnvironmentPresetManager` ya está creado y los 3 presets (Day/Night/Blend) ya tienen
+material de skybox + luz + fog auto-rellenados por "Setup All" (valores tomados de las
+escenas demo de BOXOPHOBIC). Falta a mano:
+1. Colocar en la escena el GO `environment` (rig de sol/skybox).
+2. Asignarlo al campo `environment` de `EnvironmentManager` en el Inspector.
+3. Ajustar `environmentRotationEuler` de cada uno de los 3 presets a ojo.
+4. Correr **Setup All** de nuevo (no pisa lo ya configurado, solo rellena lo que falte).
+
 ## Color Enum
 
 `Red=0, Blue=1, Green=2, Yellow=3` — used as int everywhere in NetworkVariables.

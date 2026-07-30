@@ -39,11 +39,14 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] private GameObject waitHostText;
 
     [Header("Error feedback")]
+    [SerializeField] private GameObject errorToastRoot;
     [SerializeField] private TextMeshProUGUI errorText;
 
     private ActionPlayerManager localPlayer;
     private int selectedMaxPlayers = 2;
     private string _joinCode = string.Empty;
+    private Coroutine _errorHideCoroutine;
+    private const float ErrorToastSeconds = 3f;
 
     private void Awake()
     {
@@ -58,7 +61,7 @@ public class LobbyUIManager : MonoBehaviour
         bool hasName = !string.IsNullOrWhiteSpace(PlayerPrefs.GetString(PlayerNameKey, ""));
         ShowPanel(hasName ? menuPanel : namePanel);
         if (backToMenuButton != null) backToMenuButton.onClick.AddListener(OnBackToMenu);
-        if (errorText != null) errorText.gameObject.SetActive(false);
+        if (errorToastRoot != null) errorToastRoot.SetActive(false);
 
         if (SessionNetworkManager.Instance == null)
         {
@@ -165,7 +168,10 @@ public class LobbyUIManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            ShowError(e.Message);
+            // SessionNetworkManager already catches and reports its own failures via
+            // OnError — reaching here means something unexpected slipped through.
+            Debug.LogError($"[LobbyUI] OnCreateRoomButton: {e}");
+            ShowError("No se pudo crear la sala. Probá de nuevo.");
         }
     }
 
@@ -185,7 +191,8 @@ public class LobbyUIManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            ShowError(e.Message);
+            Debug.LogError($"[LobbyUI] OnJoinRoomButton: {e}");
+            ShowError("Sala no encontrada o llena. Revisá el código.");
         }
     }
 
@@ -253,13 +260,33 @@ public class LobbyUIManager : MonoBehaviour
         waitPanel.SetActive(target == waitPanel);
         winPanel.SetActive(target == winPanel);
         namePanel.SetActive(target == namePanel);
-        if (errorText != null) errorText.gameObject.SetActive(false);
+        HideError();
     }
 
+    // Toast lives outside any panel (see TintedShowdownSetup.EnsureErrorToast) so it's
+    // visible regardless of which panel is active, and disappears on its own instead of
+    // sitting there looking like a leftover console.log.
     private void ShowError(string msg)
     {
-        if (errorText == null) return;
+        if (errorText == null || errorToastRoot == null) return;
         errorText.text = msg;
-        errorText.gameObject.SetActive(true);
+        errorToastRoot.SetActive(true);
+
+        if (_errorHideCoroutine != null) StopCoroutine(_errorHideCoroutine);
+        _errorHideCoroutine = StartCoroutine(HideErrorAfterDelay());
+    }
+
+    private void HideError()
+    {
+        if (_errorHideCoroutine != null) StopCoroutine(_errorHideCoroutine);
+        _errorHideCoroutine = null;
+        if (errorToastRoot != null) errorToastRoot.SetActive(false);
+    }
+
+    private IEnumerator HideErrorAfterDelay()
+    {
+        yield return new WaitForSeconds(ErrorToastSeconds);
+        errorToastRoot.SetActive(false);
+        _errorHideCoroutine = null;
     }
 }

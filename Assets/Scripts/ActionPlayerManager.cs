@@ -20,6 +20,12 @@ public class ActionPlayerManager : NetworkBehaviour
     [Header("Weapon parts — tinted with weaponColor")]
     [SerializeField] private GameObject[] weaponParts;
 
+    // A real Material asset, not Shader.Find: a shader only looked up by string in code
+    // gets stripped from standalone builds if nothing else references it, so Shader.Find
+    // silently returns null outside the Editor. Cloning a real asset guarantees the
+    // shader ships in the build.
+    [SerializeField] private Material flatMaterialTemplate;
+
     [Header("Score text")]
     [SerializeField] private TextMeshPro scoreText;
 
@@ -88,18 +94,17 @@ public class ActionPlayerManager : NetworkBehaviour
         weaponPaintMaterials = CreatePaintMaterials(weaponParts);
     }
 
-    private static Material[] CreatePaintMaterials(GameObject[] parts)
+    private Material[] CreatePaintMaterials(GameObject[] parts)
     {
-        if (parts == null) return System.Array.Empty<Material>();
+        if (parts == null || flatMaterialTemplate == null) return System.Array.Empty<Material>();
 
-        var shader = Shader.Find("Unlit/Color");
         var materials = new System.Collections.Generic.List<Material>();
         foreach (var part in parts)
         {
             if (part == null) continue;
             foreach (var r in part.GetComponentsInChildren<Renderer>(true))
             {
-                var mat = new Material(shader);
+                var mat = new Material(flatMaterialTemplate);
                 r.material = mat;
                 materials.Add(mat);
             }
@@ -118,7 +123,14 @@ public class ActionPlayerManager : NetworkBehaviour
             billboardCamera = Object.FindFirstObjectByType<Camera>();
 
         if (billboardCamera != null)
-            scoreText.transform.LookAt(billboardCamera.transform);
+        {
+            // LookAt(camera) directly would point the text's front face away from the
+            // viewer — TextMeshPro's mesh faces -Z by default, so the front is the SIDE
+            // OPPOSITE the look target. Looking at the mirrored point (behind the text,
+            // away from the camera) flips that, so the readable face ends up toward the camera.
+            Vector3 mirroredTarget = scoreText.transform.position * 2f - billboardCamera.transform.position;
+            scoreText.transform.LookAt(mirroredTarget);
+        }
     }
 
     public override void OnNetworkSpawn()

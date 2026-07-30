@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <!-- Fija el viewport: evita zoom/scroll del navegador en celulares -->
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+  <title>{{{ PRODUCT_NAME }}}</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    /* Posicionado y dimensionado por JS (ver layout() más abajo) — se ajusta a un
+       aspect ratio landscape entre 16:9 y 21:9 (rango probado por el proyecto, ver
+       MobileLandscapeSizes en TintedShowdownSetup.cs), con letterbox negro fuera de eso. */
+    #unity-container {
+      position: absolute;
+    }
+
+    #unity-canvas {
+      width: 100%;
+      height: 100%;
+      background: #231F20;
+      display: block;
+    }
+
+    #unity-loading-bar {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      width: 220px;
+      text-align: center;
+      font-family: sans-serif;
+      color: #ccc;
+    }
+    #unity-progress-bar-empty {
+      width: 220px;
+      height: 12px;
+      border-radius: 6px;
+      background: #333;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    #unity-progress-bar-full {
+      width: 0%;
+      height: 100%;
+      background: #3aa0ff;
+    }
+
+    /* Errores/warnings de Unity mostrados de forma visible en vez de un alert()
+       bloqueante o una pantalla en blanco silenciosa. */
+    #unity-warning {
+      position: absolute;
+      left: 50%;
+      top: 5%;
+      transform: translate(-50%);
+      max-width: 80%;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: sans-serif;
+      font-size: 14px;
+      display: none;
+      z-index: 20;
+    }
+
+    /* El juego no tiene layout portrait — en vez de romperse, se pide rotar. */
+    #rotate-overlay {
+      position: absolute;
+      inset: 0;
+      background: #000;
+      color: #fff;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-family: sans-serif;
+      font-size: 22px;
+      padding: 24px;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="rotate-overlay">Girá tu dispositivo<br>Este juego se juega en horizontal.</div>
+  <div id="unity-container">
+    <!-- width/height del atributo son solo el valor inicial; el CSS/JS mandan el tamaño real -->
+    <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
+    <div id="unity-loading-bar">
+      Cargando...
+      <div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div>
+    </div>
+    <div id="unity-warning"></div>
+  </div>
+  <script>
+    // ── Layout responsive ──────────────────────────────────────────────────
+    // Llena toda la ventana, pero clampeado a un aspect ratio landscape entre
+    // 16:9 y 21:9 (2520x1080) — el rango de resoluciones mobile que este proyecto
+    // ya probó (ver MobileLandscapeSizes en TintedShowdownSetup.cs). Fuera de ese
+    // rango se deja una franja negra (letterbox) en vez de estirar la UI a un
+    // aspect ratio nunca probado.
+    var container = document.querySelector("#unity-container");
+    var rotateOverlay = document.querySelector("#rotate-overlay");
+    var MIN_ASPECT = 16 / 9;
+    var MAX_ASPECT = 2520 / 1080;
+
+    function layout() {
+      var w = window.innerWidth, h = window.innerHeight;
+
+      // Portrait (celular parado): el juego no tiene layout para esto, se pide rotar
+      // en vez de mostrar la UI landscape aplastada/rota.
+      if (h > w) {
+        rotateOverlay.style.display = "flex";
+        container.style.display = "none";
+        return;
+      }
+      rotateOverlay.style.display = "none";
+      container.style.display = "block";
+
+      var targetAspect = Math.min(MAX_ASPECT, Math.max(MIN_ASPECT, w / h));
+      var cw, ch;
+      if (w / h > targetAspect) { ch = h; cw = h * targetAspect; }
+      else                      { cw = w; ch = w / targetAspect; }
+
+      container.style.width  = cw + "px";
+      container.style.height = ch + "px";
+      container.style.left   = ((w - cw) / 2) + "px";
+      container.style.top    = ((h - ch) / 2) + "px";
+    }
+    window.addEventListener("resize", layout);
+    window.addEventListener("orientationchange", layout);
+    layout();
+
+    // ── Bootstrap de Unity ─────────────────────────────────────────────────
+    var canvas = document.querySelector("#unity-canvas");
+
+    function unityShowBanner(msg, type) {
+      var el = document.querySelector("#unity-warning");
+      var div = document.createElement("div");
+      div.innerHTML = msg;
+      el.appendChild(div);
+      el.style.display = "block";
+      if (type == "error") {
+        div.style.cssText = "background:#ffdcdc;color:#900;padding:6px;";
+      } else {
+        div.style.cssText = "background:#ffe;color:#333;padding:6px;";
+        setTimeout(function () {
+          if (div.parentNode) el.removeChild(div);
+          if (!el.children.length) el.style.display = "none";
+        }, 5000);
+      }
+    }
+
+    var buildUrl = "Build";
+    var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+    var config = {
+      arguments: [],
+      dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+      frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+      codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: "{{{ COMPANY_NAME }}}",
+      productName: "{{{ PRODUCT_NAME }}}",
+      productVersion: "{{{ PRODUCT_VERSION }}}",
+      showBanner: unityShowBanner,
+    };
+
+    document.querySelector("#unity-loading-bar").style.display = "block";
+
+    var script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = function () {
+      createUnityInstance(canvas, config, function (progress) {
+        document.querySelector("#unity-progress-bar-full").style.width = (100 * progress) + "%";
+      }).then(function (unityInstance) {
+        document.querySelector("#unity-loading-bar").style.display = "none";
+      }).catch(function (message) {
+        // Error fatal de carga: se muestra visiblemente, no se oculta
+        unityShowBanner(message, "error");
+      });
+    };
+    document.body.appendChild(script);
+  </script>
+</body>
+</html>
