@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Unity.Netcode;
@@ -784,6 +785,13 @@ public static class TintedShowdownSetup
 
     private static void SetupArenaScene()
     {
+        // Prevent Unity's "Auto Generate" lighting mode from baking lightmaps/reflection
+        // probes the moment this method adds/touches lit geometry and saves the scene.
+        // With environmentRotationEuler still at the placeholder (0,0,0) for all 3
+        // presets, any bake right now is for the wrong sun angle and gets thrown away
+        // the moment that's tuned by eye — baking is a manual step for later.
+        Lightmapping.giWorkflowMode = Lightmapping.GIWorkflowMode.OnDemand;
+
         var scene = EditorSceneManager.OpenScene(ArenaScenePath, OpenSceneMode.Single);
 
         // Remove any Player GOs left in the scene — players must only exist at runtime
@@ -797,14 +805,15 @@ public static class TintedShowdownSetup
         gmGO.GetOrAdd<NetworkObject>();
         var gm = gmGO.GetOrAdd<GameManager>();
 
-        // EnvironmentManager — random Day/Night/Blend skybox preset, synced to all clients.
-        // "environment" Transform and each preset's rotation are NOT set here — those
-        // depend on where you place the sun/skybox rig in this specific scene, so you set
-        // them by hand in the Inspector. Only the values that must match the source demo
-        // scenes exactly (skybox material, light color/intensity, fog) are auto-filled.
+        // EnvironmentManager — random Day/Night/Blend skybox preset, re-rolled by
+        // GameManager at the start of every round, synced to all clients. The rig
+        // (EnsureEnvironmentRig) and skybox/light/fog values (EnsureEnvironmentPresets)
+        // are auto-filled; only each preset's rotation is a by-eye Inspector tweak.
         var envGO = FindOrCreate("EnvironmentManager");
         envGO.GetOrAdd<NetworkObject>();
-        EnsureEnvironmentPresets(envGO.GetOrAdd<EnvironmentPresetManager>());
+        var envMgr = envGO.GetOrAdd<EnvironmentPresetManager>();
+        EnsureEnvironmentPresets(envMgr);
+        EnsureEnvironmentRig(scene, envMgr);
 
         // Spawn points in a circle — players face the center
         var spawnRoot = FindOrCreate("SpawnPoints");
@@ -861,6 +870,18 @@ public static class TintedShowdownSetup
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("[Setup] Arena.unity saved");
+
+        // Saving a scene with lit geometry auto-bakes lightmaps/reflection probes into an
+        // "Arena/" companion folder even with giWorkflowMode set to OnDemand — that bake
+        // is for environmentRotationEuler's still-unset (0,0,0) placeholder, so it's
+        // ~27MB that becomes stale the moment that rotation is tuned by eye. This folder
+        // didn't exist before EnsureEnvironmentRig, so it's always safe to clear here.
+        const string arenaLightingDataFolder = "Assets/Scenes/Arena";
+        if (AssetDatabase.IsValidFolder(arenaLightingDataFolder))
+        {
+            AssetDatabase.DeleteAsset(arenaLightingDataFolder);
+            Debug.Log("[Setup] Cleared auto-generated Arena/ lighting data (stale until rotations are tuned)");
+        }
     }
 
     // Values lifted directly from Demo Day.unity / Demo Night.unity / Demo Blend.unity
@@ -914,9 +935,60 @@ public static class TintedShowdownSetup
         }
 
         so.ApplyModifiedProperties();
-        Debug.Log("[Setup] Environment presets filled (Day/Night/Blend). Pending manual steps: " +
-                  "assign 'environment' (Transform) on EnvironmentManager, and set each preset's " +
-                  "rotation by eye in the Inspector.");
+        Debug.Log("[Setup] Environment presets filled (Day/Night/Blend). Pending manual step: " +
+                  "set each preset's rotation by eye in the Inspector (environmentRotationEuler) " +
+                  "— that one's a visual judgment call, not something to script.");
+    }
+
+    // Copies the "ENVIRONMENT" sun+skybox rig from the BOXOPHOBIC demo scene into Arena
+    // and wires it to EnvironmentManager.environment. Only the demo scene's in-memory
+    // copy is touched — CloseScene(removeScene: true) below unloads it without saving,
+    // so the demo scene asset on disk is never modified.
+    private const string EnvironmentDemoScenePath =
+        "Assets/BOXOPHOBIC/Skybox Cubemap Extended/Demo/Demo Day.unity";
+
+    private static void EnsureEnvironmentRig(Scene arenaScene, EnvironmentPresetManager mgr)
+    {
+        var so = new SerializedObject(mgr);
+        var envProp = so.FindProperty("environment");
+        if (envProp.objectReferenceValue != null)
+        {
+            Debug.Log("[Setup] Environment rig already assigned — leaving it as-is");
+            return;
+        }
+
+        var demoScene = EditorSceneManager.OpenScene(EnvironmentDemoScenePath, OpenSceneMode.Additive);
+        GameObject sourceEnv = null;
+        foreach (var root in demoScene.GetRootGameObjects())
+        {
+            if (root.name == "ENVIRONMENT") { sourceEnv = root; break; }
+        }
+
+        if (sourceEnv == null)
+        {
+            Debug.LogWarning("[Setup] Could not find 'ENVIRONMENT' in the demo scene — skipping rig placement");
+            EditorSceneManager.CloseScene(demoScene, true);
+            return;
+        }
+
+        var envInstance = Object.Instantiate(sourceEnv);
+        envInstance.name = "environment";
+        SceneManager.MoveGameObjectToScene(envInstance, arenaScene);
+        envInstance.transform.position = Vector3.zero; // demo scene had it offset for its own layout
+
+        // The demo copy comes in fully static (Contribute GI included), which auto-bakes
+        // ~27MB of lightmaps on save — for a rotation of (0,0,0) that's a placeholder
+        // until you tune environmentRotationEuler by eye. Baking now would just be
+        // thrown away the moment that rotation changes, so strip static flags until then.
+        foreach (var t in envInstance.GetComponentsInChildren<Transform>(true))
+            GameObjectUtility.SetStaticEditorFlags(t.gameObject, (StaticEditorFlags)0);
+
+        EditorSceneManager.CloseScene(demoScene, true); // unload only — never saved, so the demo asset is untouched
+
+        envProp.objectReferenceValue = envInstance.transform;
+        so.ApplyModifiedProperties();
+
+        Debug.Log("[Setup] Environment rig copied from the demo scene and assigned to EnvironmentManager.environment");
     }
 
     private static void EnsureCanvasInScene()

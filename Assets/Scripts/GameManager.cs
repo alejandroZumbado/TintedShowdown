@@ -74,6 +74,13 @@ public class GameManager : NetworkBehaviour
         }
     }
 
+    // Server-only. FindFirstObjectByType instead of a static Instance — MPPM-safe, same
+    // reasoning as the rest of this project (see tech_mppm_safety in project memory).
+    private void RandomizeEnvironment()
+    {
+        FindFirstObjectByType<EnvironmentPresetManager>()?.RandomizePreset();
+    }
+
     // Called by ActionPlayerManager.OnNetworkSpawn on the server side
     public void RegisterPlayer(ActionPlayerManager player)
     {
@@ -113,6 +120,7 @@ public class GameManager : NetworkBehaviour
         gameRunning = true;
         yield return new WaitForSeconds(3f); // brief countdown before first round
         StartGameClientRpc();
+        RandomizeEnvironment();
         BeginTimerClientRpc();
         roundLoopCoroutine = StartCoroutine(RoundLoop());
     }
@@ -167,7 +175,8 @@ public class GameManager : NetworkBehaviour
         }
         else
         {
-            // No winner yet — restart visual timer
+            // No winner yet — new environment preset + restart visual timer for the next round
+            RandomizeEnvironment();
             BeginTimerClientRpc();
         }
     }
