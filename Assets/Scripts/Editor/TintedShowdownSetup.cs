@@ -10,6 +10,7 @@ using UnityEngine.UI;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using TMPro;
+using System.Linq;
 using System.Reflection;
 
 public static class TintedShowdownSetup
@@ -31,6 +32,23 @@ public static class TintedShowdownSetup
             "Ejecuta solo una vez antes de entrar a Play Mode.",
             "Continuar", "Cancelar")) return;
 
+        RunSetupSteps();
+
+        EditorUtility.DisplayDialog("¡Listo!",
+            "Setup completado.\n\n" +
+            "Pasos manuales:\n" +
+            "1. Project Settings → Services → vincular Unity Dashboard\n" +
+            "2. Verifica que el Player.prefab tenga Renderer asignado en ActionPlayerManager",
+            "OK");
+    }
+
+    // -executeMethod entry point for batchmode/CI use — EditorUtility.DisplayDialog
+    // can't be answered from batchmode (it just short-circuits SetupAll as "Cancelar"),
+    // so this skips the confirmation prompt entirely. Same steps, no dialogs.
+    public static void SetupAllHeadless() => RunSetupSteps();
+
+    private static void RunSetupSteps()
+    {
         SetupMobileLandscape();
         SetupAndroidPlayerSettings();
         SetupWebGLPlayerSettings();
@@ -42,13 +60,6 @@ public static class TintedShowdownSetup
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-
-        EditorUtility.DisplayDialog("¡Listo!",
-            "Setup completado.\n\n" +
-            "Pasos manuales:\n" +
-            "1. Project Settings → Services → vincular Unity Dashboard\n" +
-            "2. Verifica que el Player.prefab tenga Renderer asignado en ActionPlayerManager",
-            "OK");
     }
 
     // Testing utility: clears the saved player name (and anything else stored in
@@ -496,6 +507,16 @@ public static class TintedShowdownSetup
         // pattern as EnsureNamePanel, only adds the toast if it's missing.
         EnsureErrorToast(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
 
+        // WaitPanel was the only panel with no way back — once you create/join a room
+        // you were stuck there until it filled up or the host disconnected. Same
+        // "Ensure" pattern as above.
+        EnsureWaitPanelCancelButton(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
+
+        // Selection outline on the 2/3/4-player buttons + loading-state refs for
+        // Crear Sala / Entrar. Always re-run (idempotent), not gated behind "only if
+        // LobbyCanvas is new" like the button wiring above it.
+        EnsureSelectionAndLoadingUx(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
+
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("[Setup] GameMenu.unity saved");
@@ -614,6 +635,89 @@ public static class TintedShowdownSetup
         Debug.Log("[Setup] NamePanel added to LobbyCanvas");
     }
 
+    // WaitPanel had no way out — every other panel has a "← Volver"/back option, but once
+    // you created or joined a room you were stuck waiting until it filled up or the host
+    // disconnected. Reuses OnBackToMenuPublic (Disconnect + reload GameMenu), the exact
+    // same method the win screen's back button already calls — no new C# needed.
+    private static void EnsureWaitPanelCancelButton(GameObject canvasGO, LobbyUIManager lobbyUI)
+    {
+        if (canvasGO.transform.Find("WaitPanel/BtnCancelWait") != null)
+        {
+            Debug.Log("[Setup] WaitPanel cancel button already exists — leaving it as-is");
+            return;
+        }
+
+        var waitPanelTf = canvasGO.transform.Find("WaitPanel");
+        if (waitPanelTf == null)
+        {
+            Debug.LogWarning("[Setup] WaitPanel not found — skipping cancel button");
+            return;
+        }
+
+        var cancelBtn = MakeButton(waitPanelTf.gameObject, "BtnCancelWait", "← Cancelar", new Vector2(0, -210));
+        WireVoidButton(cancelBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnBackToMenuPublic));
+
+        Debug.Log("[Setup] WaitPanel cancel button added");
+    }
+
+    // Adds a selection outline to the 2/3/4-player buttons (LobbyUIManager toggles which
+    // one is enabled) and wires the Crear Sala / Entrar button references used for the
+    // "Conectando..." loading state. Runs unconditionally every time, same as the other
+    // Ensure* methods — safe to re-run, just re-finds and re-assigns.
+    private static void EnsureSelectionAndLoadingUx(GameObject canvasGO, LobbyUIManager lobbyUI)
+    {
+        var createPanelTf = canvasGO.transform.Find("CreatePanel");
+        var menuPanelTf   = canvasGO.transform.Find("MenuPanel");
+        if (createPanelTf == null || menuPanelTf == null)
+        {
+            Debug.LogWarning("[Setup] CreatePanel/MenuPanel not found — skipping selection/loading UX");
+            return;
+        }
+
+        // .Find() only checks direct children — these buttons may be nested inside a
+        // layout-group container (e.g. "Players") added by hand after the panel was
+        // first generated, same reason RewireColorButtons uses GetComponentsInChildren
+        // instead of a shallow Find.
+        Button FindButtonDeep(string name) => createPanelTf
+            .GetComponentsInChildren<Button>(true)
+            .FirstOrDefault(b => b.gameObject.name == name);
+
+        var maxPlayerButtons = new[]
+        {
+            FindButtonDeep("Btn2P"),
+            FindButtonDeep("Btn3P"),
+            FindButtonDeep("Btn4P"),
+        };
+
+        foreach (var btn in maxPlayerButtons)
+        {
+            if (btn == null) continue;
+            var outline = btn.GetComponent<Outline>();
+            if (outline == null)
+            {
+                outline = btn.gameObject.AddComponent<Outline>();
+                outline.effectColor    = Color.yellow;
+                outline.effectDistance = new Vector2(4, -4);
+            }
+            outline.enabled = false; // LobbyUIManager.SelectMaxPlayers turns the right one on
+        }
+
+        var createBtn = FindButtonDeep("BtnCreate");
+        var joinBtn   = menuPanelTf.GetComponentsInChildren<Button>(true)
+            .FirstOrDefault(b => b.gameObject.name == "BtnJoinConfirm");
+
+        var so = new SerializedObject(lobbyUI);
+        var arrProp = so.FindProperty("maxPlayerButtons");
+        arrProp.arraySize = maxPlayerButtons.Length;
+        for (int i = 0; i < maxPlayerButtons.Length; i++)
+            arrProp.GetArrayElementAtIndex(i).objectReferenceValue = maxPlayerButtons[i];
+        so.FindProperty("createRoomButton").objectReferenceValue = createBtn;
+        so.FindProperty("joinRoomButton").objectReferenceValue   = joinBtn;
+        so.ApplyModifiedProperties();
+
+        Debug.Log("[Setup] Selection outline + loading-state button refs wired");
+    }
+
     // Top-level toast (sibling of the panels, not nested in one) so it stays visible no
     // matter which panel is active — errorText used to be a child of MenuPanel only, so
     // errors raised while NamePanel/CreatePanel were showing never rendered.
@@ -659,7 +763,7 @@ public static class TintedShowdownSetup
 
         // Text lives on its own child GameObject ("Label") so it gets its own
         // CanvasRenderer instead of fighting the background Image for the one on toast.
-        var labelGO = new GameObject("Label");
+        var labelGO = new GameObject("Label", typeof(RectTransform));
         labelGO.transform.SetParent(toast.transform, false);
         var labelRt = labelGO.GetComponent<RectTransform>();
         labelRt.anchorMin = Vector2.zero;

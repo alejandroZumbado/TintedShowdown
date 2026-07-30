@@ -137,6 +137,109 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   minDragDistance: 50
+--- !u!1 &182896236
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 182896238}
+  - component: {fileID: 182896237}
+  - component: {fileID: 182896239}
+  m_Layer: 0
+  m_Name: EnvironmentManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &182896237
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 182896236}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
+  GlobalObjectIdHash: 14718801
+  InScenePlacedSourceGlobalObjectIdHash: 0
+  DeferredDespawnTick: 0
+  Ownership: 1
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 1
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1
+  SyncOwnerTransformWhenParented: 1
+  AllowOwnerToParent: 0
+--- !u!4 &182896238
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 182896236}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &182896239
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 182896236}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14d5b4859ca04264bbaa66167a46876b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::EnvironmentPresetManager
+  ShowTopMostFoldoutHeaderGroup: 1
+  environment: {fileID: 0}
+  presets:
+  - name: Day
+    skyboxMaterial: {fileID: 2100000, guid: 2bd8959f5fbd3644aa33af1a155fc147, type: 2}
+    environmentRotationEuler: {x: 0, y: 0, z: 0}
+    lightColor: {r: 1, g: 0.5917582, b: 0.21226418, a: 1}
+    lightIntensity: 1.5
+    fogEnabled: 1
+    fogColor: {r: 1, g: 0.43005908, b: 0.24313724, a: 1}
+    linearFogStart: 0
+    linearFogEnd: 70
+    ambientIntensity: 0.95
+  - name: Night
+    skyboxMaterial: {fileID: 2100000, guid: cc421da483ed06c49933077a621bff25, type: 2}
+    environmentRotationEuler: {x: 0, y: 0, z: 0}
+    lightColor: {r: 0.26379493, g: 0.40115762, b: 0.9811321, a: 1}
+    lightIntensity: 1.2
+    fogEnabled: 1
+    fogColor: {r: 0.7830189, g: 0.21052866, b: 0.5883721, a: 1}
+    linearFogStart: -10
+    linearFogEnd: 100
+    ambientIntensity: 1
+  - name: Blend
+    skyboxMaterial: {fileID: 2100000, guid: 1cf6f4c6e6e0518419839d3f5448dd99, type: 2}
+    environmentRotationEuler: {x: 0, y: 0, z: 0}
+    lightColor: {r: 1, g: 0.7654179, b: 0.5990566, a: 1}
+    lightIntensity: 1
+    fogEnabled: 0
+    fogColor: {r: 0.4762816, g: 0.6578769, b: 0.7264151, a: 1}
+    linearFogStart: 0
+    linearFogEnd: 300
+    ambientIntensity: 1
 --- !u!1 &277915217 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 5979120796068110159, guid: f6d0b8d659217714889df9939594339f, type: 3}
@@ -1382,3 +1485,4 @@ SceneRoots:
   - {fileID: 9106395464152885911}
   - {fileID: 1330213719}
   - {fileID: 461860182}
+  - {fileID: 182896238}

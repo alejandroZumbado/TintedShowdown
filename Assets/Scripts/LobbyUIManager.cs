@@ -38,8 +38,13 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] private Button copyCodeButton;
     [SerializeField] private TextMeshProUGUI waitStatusText;
 
+    [Header("Create Room — player count selector (index 0→2 players, 1→3, 2→4)")]
+    [SerializeField] private Button[] maxPlayerButtons;
+    [SerializeField] private Button createRoomButton;
+
     [Header("Join Room")]
     [SerializeField] private TMP_InputField joinCodeInput;
+    [SerializeField] private Button joinRoomButton;
 
     [Header("Win Screen")]
     [SerializeField] private TextMeshProUGUI winnerText;
@@ -148,7 +153,12 @@ public class LobbyUIManager : MonoBehaviour
     }
 
     public void ShowMenuPanel()   => ShowPanel(menuPanel);
-    public void ShowCreatePanel() => ShowPanel(createPanel);
+
+    public void ShowCreatePanel()
+    {
+        ShowPanel(createPanel);
+        UpdateMaxPlayersHighlight(); // reflect the default (2) the first time the panel opens
+    }
 
     // Called by the name panel's "Confirmar" button — only shown once, when
     // PlayerPrefs has no saved name yet.
@@ -172,13 +182,29 @@ public class LobbyUIManager : MonoBehaviour
     {
         selectedMaxPlayers = count;
         Debug.Log($"[LobbyUI] Selected max players: {count}");
+        UpdateMaxPlayersHighlight();
+    }
+
+    // Outlines the currently-selected player-count button — buttons are ordered 2/3/4
+    // players, matching maxPlayerButtons[0..2]. The outline itself is added once by
+    // TintedShowdownSetup (EnsureSelectionAndLoadingUx) and starts disabled.
+    private void UpdateMaxPlayersHighlight()
+    {
+        if (maxPlayerButtons == null) return;
+        for (int i = 0; i < maxPlayerButtons.Length; i++)
+        {
+            int count = i + 2;
+            var outline = maxPlayerButtons[i] != null ? maxPlayerButtons[i].GetComponent<Outline>() : null;
+            if (outline != null) outline.enabled = count == selectedMaxPlayers;
+        }
     }
 
     public async void OnCreateRoomButton()
     {
+        Debug.Log($"[LobbyUI] OnCreateRoomButton selectedMaxPlayers={selectedMaxPlayers}");
+        string original = BeginLoading(createRoomButton, "Conectando...");
         try
         {
-            Debug.Log($"[LobbyUI] OnCreateRoomButton selectedMaxPlayers={selectedMaxPlayers}");
             await SessionNetworkManager.Instance.CreateRoomAsync(selectedMaxPlayers);
         }
         catch (Exception e)
@@ -187,6 +213,10 @@ public class LobbyUIManager : MonoBehaviour
             // OnError — reaching here means something unexpected slipped through.
             Debug.LogError($"[LobbyUI] OnCreateRoomButton: {e}");
             ShowError("No se pudo crear la sala. Probá de nuevo.");
+        }
+        finally
+        {
+            EndLoading(createRoomButton, original);
         }
     }
 
@@ -200,6 +230,7 @@ public class LobbyUIManager : MonoBehaviour
             ShowError("Ingresa un código de sala.");
             return;
         }
+        string original = BeginLoading(joinRoomButton, "Conectando...");
         try
         {
             await SessionNetworkManager.Instance.JoinRoomAsync(code);
@@ -209,6 +240,34 @@ public class LobbyUIManager : MonoBehaviour
             Debug.LogError($"[LobbyUI] OnJoinRoomButton: {e}");
             ShowError("Sala no encontrada o llena. Revisá el código.");
         }
+        finally
+        {
+            EndLoading(joinRoomButton, original);
+        }
+    }
+
+    // Disables the button (doubles as a double-click guard) and swaps its label to a
+    // loading message — CreateRoomAsync/JoinRoomAsync take a few seconds (UGS auth +
+    // Relay allocation) with no other visual feedback otherwise. Returns the label's
+    // original text so EndLoading can put it back.
+    private static string BeginLoading(Button button, string loadingText)
+    {
+        if (button == null) return null;
+        button.interactable = false;
+        var label = button.GetComponentInChildren<TextMeshProUGUI>();
+        if (label == null) return null;
+        string original = label.text;
+        label.text = loadingText;
+        return original;
+    }
+
+    private static void EndLoading(Button button, string originalText)
+    {
+        if (button == null) return;
+        button.interactable = true;
+        if (originalText == null) return;
+        var label = button.GetComponentInChildren<TextMeshProUGUI>();
+        if (label != null) label.text = originalText;
     }
 
     // ─── Called by LobbyNetwork.PushCountClientRpc (and OnPlayerCountChanged fallback) ──
