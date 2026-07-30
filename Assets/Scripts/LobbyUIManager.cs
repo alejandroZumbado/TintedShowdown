@@ -185,17 +185,22 @@ public class LobbyUIManager : MonoBehaviour
         UpdateMaxPlayersHighlight();
     }
 
-    // Outlines the currently-selected player-count button — buttons are ordered 2/3/4
-    // players, matching maxPlayerButtons[0..2]. The outline itself is added once by
-    // TintedShowdownSetup (EnsureSelectionAndLoadingUx) and starts disabled.
+    // Colors of the 2/3/4-player buttons — default matches MakeButton's base Image
+    // color, Selected is a bright accent so the current pick reads clearly at any scale
+    // (an Outline effect was tried first but was too subtle to notice — see setup script).
+    private static readonly Color32 MaxPlayersDefaultColor  = new Color32(255, 255, 255, 200);
+    private static readonly Color32 MaxPlayersSelectedColor = new Color32(255, 205, 40, 230);
+
+    // Highlights the currently-selected player-count button — buttons are ordered 2/3/4
+    // players, matching maxPlayerButtons[0..2].
     private void UpdateMaxPlayersHighlight()
     {
         if (maxPlayerButtons == null) return;
         for (int i = 0; i < maxPlayerButtons.Length; i++)
         {
             int count = i + 2;
-            var outline = maxPlayerButtons[i] != null ? maxPlayerButtons[i].GetComponent<Outline>() : null;
-            if (outline != null) outline.enabled = count == selectedMaxPlayers;
+            var image = maxPlayerButtons[i] != null ? maxPlayerButtons[i].GetComponent<Image>() : null;
+            if (image != null) image.color = count == selectedMaxPlayers ? MaxPlayersSelectedColor : MaxPlayersDefaultColor;
         }
     }
 

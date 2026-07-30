@@ -689,18 +689,10 @@ public static class TintedShowdownSetup
             FindButtonDeep("Btn4P"),
         };
 
-        foreach (var btn in maxPlayerButtons)
-        {
-            if (btn == null) continue;
-            var outline = btn.GetComponent<Outline>();
-            if (outline == null)
-            {
-                outline = btn.gameObject.AddComponent<Outline>();
-                outline.effectColor    = Color.yellow;
-                outline.effectDistance = new Vector2(4, -4);
-            }
-            outline.enabled = false; // LobbyUIManager.SelectMaxPlayers turns the right one on
-        }
+        // Tried UnityEngine.UI.Outline first — it only offsets a duplicate copy of the
+        // graphic in one direction (a drop-shadow, not a ring), which at this button
+        // size/CanvasScaler factor was too subtle to read as "selected" at a glance.
+        // A background color swap is unambiguous regardless of scale.
 
         var createBtn = FindButtonDeep("BtnCreate");
         var joinBtn   = menuPanelTf.GetComponentsInChildren<Button>(true)
