@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Runtime.InteropServices;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
@@ -10,6 +11,14 @@ using UnityEngine.UI;
 // Bridges Canvas buttons to the local player's ActionPlayerManager.
 public class LobbyUIManager : MonoBehaviour
 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+    // GUIUtility.systemCopyBuffer isn't wired to the real browser clipboard on WebGL —
+    // it's a plain in-memory field there. Assets/Plugins/WebGL/ClipboardPlugin.jslib
+    // bridges to navigator.clipboard.writeText, which actually reaches the OS clipboard.
+    [DllImport("__Internal")]
+    private static extern void CopyToClipboard(string text);
+#endif
+
     public static LobbyUIManager Instance { get; private set; }
 
     [Header("Panels — assign all in Inspector")]
@@ -118,7 +127,11 @@ public class LobbyUIManager : MonoBehaviour
     public void OnCopyCodeButton()
     {
         if (string.IsNullOrEmpty(_joinCode)) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        CopyToClipboard(_joinCode);
+#else
         GUIUtility.systemCopyBuffer = _joinCode;
+#endif
         StartCoroutine(CopyFeedback());
     }
 
