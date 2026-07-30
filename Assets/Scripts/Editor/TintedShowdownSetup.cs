@@ -971,10 +971,17 @@ public static class TintedShowdownSetup
             return;
         }
 
+        // Keep the demo's original Y — it's the offset that puts this rig's decoration at
+        // its own ground level (the demo scene's ENVIRONMENT sits at y=-2.952, not y=0,
+        // specifically to compensate for that). Zeroing Y here previously left every prop
+        // floating ~3 units above Arena's actual floor. X/Z are still zeroed since Arena's
+        // horizontal layout doesn't need to match the demo's.
+        float sourceY = sourceEnv.transform.position.y;
+
         var envInstance = Object.Instantiate(sourceEnv);
         envInstance.name = "environment";
         SceneManager.MoveGameObjectToScene(envInstance, arenaScene);
-        envInstance.transform.position = Vector3.zero; // demo scene had it offset for its own layout
+        envInstance.transform.position = new Vector3(0f, sourceY, 0f);
 
         // The demo copy comes in fully static (Contribute GI included), which auto-bakes
         // ~27MB of lightmaps on save — for a rotation of (0,0,0) that's a placeholder
