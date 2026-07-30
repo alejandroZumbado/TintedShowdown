@@ -58,6 +58,10 @@ public class SessionNetworkManager : MonoBehaviour
             var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
             if (transport == null) { OnError?.Invoke("UnityTransport no encontrado."); return; }
 
+            // Must match PreferredConnectionType() below — UTP logs an error and silently
+            // forces WebSocket mode anyway if this flag disagrees with the relay data, but
+            // leaving it out of sync is undefined behavior we shouldn't rely on.
+            transport.UseWebSockets = Application.platform == RuntimePlatform.WebGLPlayer;
             transport.SetRelayServerData(BuildHostRelayData(allocation));
 
             _maxPlayers = maxPlayers;
@@ -95,6 +99,7 @@ public class SessionNetworkManager : MonoBehaviour
             var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
             if (transport == null) { OnError?.Invoke("UnityTransport no encontrado."); return; }
 
+            transport.UseWebSockets = Application.platform == RuntimePlatform.WebGLPlayer;
             transport.SetRelayServerData(BuildClientRelayData(allocation));
 
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleDisconnect;
