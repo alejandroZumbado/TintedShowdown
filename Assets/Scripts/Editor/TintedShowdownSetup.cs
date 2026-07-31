@@ -1013,38 +1013,11 @@ public static class TintedShowdownSetup
 
         // The demo scattered this decoration (trees/rocks/fences) close to its own pivot
         // for a static diorama shot — with environment re-centered on Arena's origin,
-        // some of it now sits inside the actual play area (spawn points sit on a
-        // SpawnRadius-meter circle) and can plant a player's camera right inside a tree
-        // at spawn. Clear a margin around the play area so gameplay space stays open.
-        // Checked against each Renderer's actual world-space bounds, not just the prop's
-        // pivot point — a tree's trunk can sit just outside the radius while its canopy
-        // still reaches in (this is why a first pass checking pivot-only wasn't enough).
-        // Only removes objects with a Renderer — the sun/light itself has none, so it's
-        // never a candidate here regardless of position.
-        const float clearanceRadius = SpawnRadius + 5f;
-        var envChildren = envInstance.transform.Cast<Transform>().ToList();
-        int clearedCount = 0;
-        foreach (var child in envChildren)
-        {
-            var renderers = child.GetComponentsInChildren<Renderer>();
-            if (renderers.Length == 0) continue;
-
-            bool tooClose = false;
-            foreach (var r in renderers)
-            {
-                var b = r.bounds;
-                float closestX = Mathf.Clamp(0f, b.min.x, b.max.x);
-                float closestZ = Mathf.Clamp(0f, b.min.z, b.max.z);
-                if (new Vector2(closestX, closestZ).magnitude < clearanceRadius) { tooClose = true; break; }
-            }
-            if (tooClose)
-            {
-                Object.DestroyImmediate(child.gameObject);
-                clearedCount++;
-            }
-        }
-        if (clearedCount > 0)
-            Debug.Log($"[Setup] Cleared {clearedCount} decoration prop(s) whose bounds reached inside the {clearanceRadius}m play-area radius");
+        // some of it can end up inside the actual play area and block a player's camera
+        // at spawn. An automatic distance-based cull was tried here and repeatedly wasn't
+        // enough (a tree's canopy reaches further than its trunk's bounds suggested) — the
+        // user repositions props by hand in the Editor now instead. All ~25 original
+        // props are kept as-is.
 
         // The demo copy comes in fully static (Contribute GI included), which auto-bakes
         // ~27MB of lightmaps on save — for a rotation of (0,0,0) that's a placeholder
