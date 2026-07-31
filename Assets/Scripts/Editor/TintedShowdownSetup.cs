@@ -1016,23 +1016,35 @@ public static class TintedShowdownSetup
         // some of it now sits inside the actual play area (spawn points sit on a
         // SpawnRadius-meter circle) and can plant a player's camera right inside a tree
         // at spawn. Clear a margin around the play area so gameplay space stays open.
+        // Checked against each Renderer's actual world-space bounds, not just the prop's
+        // pivot point — a tree's trunk can sit just outside the radius while its canopy
+        // still reaches in (this is why a first pass checking pivot-only wasn't enough).
         // Only removes objects with a Renderer — the sun/light itself has none, so it's
         // never a candidate here regardless of position.
-        const float clearanceRadius = SpawnRadius + 2f;
+        const float clearanceRadius = SpawnRadius + 5f;
         var envChildren = envInstance.transform.Cast<Transform>().ToList();
         int clearedCount = 0;
         foreach (var child in envChildren)
         {
-            if (child.GetComponentInChildren<Renderer>() == null) continue;
-            var xz = new Vector2(child.localPosition.x, child.localPosition.z);
-            if (xz.magnitude < clearanceRadius)
+            var renderers = child.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) continue;
+
+            bool tooClose = false;
+            foreach (var r in renderers)
+            {
+                var b = r.bounds;
+                float closestX = Mathf.Clamp(0f, b.min.x, b.max.x);
+                float closestZ = Mathf.Clamp(0f, b.min.z, b.max.z);
+                if (new Vector2(closestX, closestZ).magnitude < clearanceRadius) { tooClose = true; break; }
+            }
+            if (tooClose)
             {
                 Object.DestroyImmediate(child.gameObject);
                 clearedCount++;
             }
         }
         if (clearedCount > 0)
-            Debug.Log($"[Setup] Cleared {clearedCount} decoration prop(s) from inside the {clearanceRadius}m play-area radius");
+            Debug.Log($"[Setup] Cleared {clearedCount} decoration prop(s) whose bounds reached inside the {clearanceRadius}m play-area radius");
 
         // The demo copy comes in fully static (Contribute GI included), which auto-bakes
         // ~27MB of lightmaps on save — for a rotation of (0,0,0) that's a placeholder
