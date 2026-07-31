@@ -63,6 +63,34 @@ public static class TintedShowdownSetup
         AssetDatabase.Refresh();
     }
 
+    // Wipes the placed "environment" rig (and its lighting bake, if any) so the next
+    // Setup All recreates it from scratch — useful whenever EnsureEnvironmentRig's logic
+    // changes (placement, clearance radius, etc.) after the rig was already generated
+    // once, since that method otherwise leaves an existing assignment alone.
+    [MenuItem("Tinted Showdown/Reset Environment Rig (dev)")]
+    public static void ResetEnvironmentRig()
+    {
+        var scene = EditorSceneManager.OpenScene(ArenaScenePath, OpenSceneMode.Single);
+        var mgr = GameObject.Find("EnvironmentManager")?.GetComponent<EnvironmentPresetManager>();
+        if (mgr == null) { Debug.LogWarning("[Reset] EnvironmentManager not found"); return; }
+
+        var so = new SerializedObject(mgr);
+        var envProp = so.FindProperty("environment");
+        if (envProp.objectReferenceValue is Transform oldEnv)
+            Object.DestroyImmediate(oldEnv.gameObject);
+        envProp.objectReferenceValue = null;
+        so.ApplyModifiedProperties();
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+
+        const string arenaLightingDataFolder = "Assets/Scenes/Arena";
+        if (AssetDatabase.IsValidFolder(arenaLightingDataFolder))
+            AssetDatabase.DeleteAsset(arenaLightingDataFolder);
+
+        Debug.Log("[Reset] Environment rig cleared — run Setup All to recreate it.");
+    }
+
     // Testing utility: clears the saved player name (and anything else stored in
     // PlayerPrefs) so the NamePanel prompt shows up again on the next Play session.
     [MenuItem("Tinted Showdown/Borrar PlayerPrefs (testing)")]
@@ -982,6 +1010,29 @@ public static class TintedShowdownSetup
         envInstance.name = "environment";
         SceneManager.MoveGameObjectToScene(envInstance, arenaScene);
         envInstance.transform.position = new Vector3(0f, sourceY, 0f);
+
+        // The demo scattered this decoration (trees/rocks/fences) close to its own pivot
+        // for a static diorama shot — with environment re-centered on Arena's origin,
+        // some of it now sits inside the actual play area (spawn points sit on a
+        // SpawnRadius-meter circle) and can plant a player's camera right inside a tree
+        // at spawn. Clear a margin around the play area so gameplay space stays open.
+        // Only removes objects with a Renderer — the sun/light itself has none, so it's
+        // never a candidate here regardless of position.
+        const float clearanceRadius = SpawnRadius + 2f;
+        var envChildren = envInstance.transform.Cast<Transform>().ToList();
+        int clearedCount = 0;
+        foreach (var child in envChildren)
+        {
+            if (child.GetComponentInChildren<Renderer>() == null) continue;
+            var xz = new Vector2(child.localPosition.x, child.localPosition.z);
+            if (xz.magnitude < clearanceRadius)
+            {
+                Object.DestroyImmediate(child.gameObject);
+                clearedCount++;
+            }
+        }
+        if (clearedCount > 0)
+            Debug.Log($"[Setup] Cleared {clearedCount} decoration prop(s) from inside the {clearanceRadius}m play-area radius");
 
         // The demo copy comes in fully static (Contribute GI included), which auto-bakes
         // ~27MB of lightmaps on save — for a rotation of (0,0,0) that's a placeholder
