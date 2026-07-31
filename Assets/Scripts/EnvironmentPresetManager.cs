@@ -20,18 +20,10 @@ public class EnvironmentPresetManager : NetworkBehaviour
     {
         _presetIndex.OnValueChanged += (_, newIndex) => Apply(newIndex);
 
-        if (IsServer) RandomizePreset();
+        if (IsServer)
+            _presetIndex.Value = Random.Range(0, presets.Length);
 
         Apply(_presetIndex.Value);
-    }
-
-    // Called by GameManager at the start of every round — server-authoritative, so all
-    // 4 players always see the same preset (NetworkVariable replication handles the sync,
-    // same as the initial pick in OnNetworkSpawn).
-    public void RandomizePreset()
-    {
-        if (!IsServer) return;
-        _presetIndex.Value = Random.Range(0, presets.Length);
     }
 
     private void Apply(int index)

@@ -99,10 +99,13 @@ GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
 ### `EnvironmentManager` (Arena.unity)
 `EnvironmentPresetManager` ya está creado. Setup All ahora rellena todo automáticamente:
 - Los 3 presets (Day/Night/Blend) con material de skybox + luz + fog (de las escenas demo de BOXOPHOBIC).
-- El rig `environment` (copiado de la escena demo `Demo Day.unity`, GameObject `ENVIRONMENT`) y asignado al campo `environment` del Inspector.
-- `GameManager` re-randomiza el preset (vía `EnvironmentPresetManager.RandomizePreset()`) al empezar cada ronda — mismo ambiente sincronizado para los 4 jugadores.
+- El rig `environment` (copiado de la escena demo `Demo Day.unity`, GameObject `ENVIRONMENT`) y asignado al campo `environment` del Inspector — decoración sin filtrar, el usuario la reacomoda a mano en el Editor.
 
-**PENDIENTE (a ojo, no se puede scriptear):** ajustar `environmentRotationEuler` de cada uno de los 3 presets en el Inspector — hoy están en `(0,0,0)`.
+El preset se elige **una sola vez por sesión**, en `OnNetworkSpawn` (server-authoritative, sincronizado a los 4 jugadores vía NetworkVariable) — se mantiene fijo toda la partida, incluyendo "Jugar de nuevo", hasta que todos salgan del lobby y se cargue una escena Arena nueva.
+
+**PENDIENTE (a ojo, no se puede scriptear):**
+1. Reacomodar a mano la decoración del rig `environment` en `Arena.unity` (en curso).
+2. Ajustar `environmentRotationEuler` de cada uno de los 3 presets en el Inspector — hoy están en `(0,0,0)`.
 
 ## Color Enum
 
