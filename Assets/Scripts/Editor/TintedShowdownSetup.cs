@@ -999,17 +999,16 @@ public static class TintedShowdownSetup
             return;
         }
 
-        // Keep the demo's original Y — it's the offset that puts this rig's decoration at
-        // its own ground level (the demo scene's ENVIRONMENT sits at y=-2.952, not y=0,
-        // specifically to compensate for that). Zeroing Y here previously left every prop
-        // floating ~3 units above Arena's actual floor. X/Z are still zeroed since Arena's
-        // horizontal layout doesn't need to match the demo's.
-        float sourceY = sourceEnv.transform.position.y;
-
         var envInstance = Object.Instantiate(sourceEnv);
         envInstance.name = "environment";
         SceneManager.MoveGameObjectToScene(envInstance, arenaScene);
-        envInstance.transform.position = new Vector3(0f, sourceY, 0f);
+
+        // Placed by hand in the Editor (2026-07-30) after the auto-centered position
+        // (0, demoY, 0) needed further adjustment to clear the play area — this is the
+        // position that actually lined up decoration with Arena's floor and kept it out
+        // of the camera. Only applies the first time the rig is created; re-running Setup
+        // All never touches an already-assigned environment (see the early-return above).
+        envInstance.transform.position = new Vector3(6.30993223f, -3.27969885f, -1.62852788f);
 
         // The demo scattered this decoration (trees/rocks/fences) close to its own pivot
         // for a static diorama shot — with environment re-centered on Arena's origin,
