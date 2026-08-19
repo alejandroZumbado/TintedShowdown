@@ -2,10 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read these first
+
+Detailed reference docs live in `docs/` (written 2026-08-18 after the local checkout
+at `C:\Users\User\Desktop\juegos unity\Tinted Showdown` lost its `.git`/`Assets` —
+this `E:\Users\Alejandro\Opal\Tinted Showdown` copy is now the active working copy):
+
+- `docs/PROJECT_OVERVIEW.md` — architecture, stack, 8 real production gotchas found
+  in this codebase (Relay endpoint selection, WebGL decompression fallback, MPPM
+  safety, RPC serialization limits, etc.), functional status, open items.
+- `docs/QUICKLOBBY_PACKAGE.md` — a **separate side-project**: the networking stack
+  of this game (NGO + Relay), extracted and sold independently as a Unity asset.
+  Lives in the sibling folder `E:\Users\Alejandro\Opal\QuickLobby-NetcodeRelayKit`
+  (own git repo, own README/manual — not part of this repo). Read this doc for
+  pricing, marketplace decisions, and pending fixes before touching that folder.
+- `docs/STATUS.md` — where everything currently lives on disk, and what's stashed/pending.
+
 ## Project
 
 **Tinted Showdown** — Unity 6000.3.13f1, online 2–4 player FFA color-matching game.
-Platforms: PC, Android, WebGL.
+Platforms: PC, Android, WebGL. Published build: https://alejandrozumbado.github.io/tinted-showdown-build/
 
 ## Game Rules
 
@@ -28,7 +44,7 @@ Architecture: **1 Host + up to 3 Clients**. Host is always player 1. No dedicate
 ## Scene Flow
 
 ```
-GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
+GameMenu.unity  →  (all players joined)  →  server loads Arena.unity
   LobbyUIManager panels:                      GameManager.OnNetworkSpawn
   menu → create / join → wait room            spawns one Player per client
 ```
@@ -38,7 +54,7 @@ GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
 ### `SessionNetworkManager.cs` (MonoBehaviour, DontDestroyOnLoad)
 - `CreateRoomAsync(int maxPlayers)` → UGS login + Relay alloc + `StartHost()`
 - `JoinRoomAsync(string code)` → UGS login + Relay join + `StartClient()`
-- `LoadGameScene()` → `NetworkManager.SceneManager.LoadScene("1v1", Single)` (server only)
+- `LoadGameScene()` → `NetworkManager.SceneManager.LoadScene("Arena", Single)` (server only)
 - Fires events: `OnRoomCreated(code)`, `OnJoinedRoom`, `OnHostLeft`, `OnError(msg)`
 - WebGL protocol: `"wss"` instead of `"dtls"` — handled automatically via `Application.platform`
 
@@ -50,18 +66,22 @@ GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
 - `OnNetworkSpawn`: owner picks random starting colors; server calls `GameManager.RegisterPlayer`
 - `ChangeColor(int)` / `AttackColor(int)` — guard-checked `if (!IsOwner) return`
 
-### `GameManager.cs` (NetworkBehaviour, scene-placed in `1v1.unity`)
+### `GameManager.cs` (NetworkBehaviour, scene-placed in `Arena.unity`)
 - `static int MaxPlayersTarget` — set by `SessionNetworkManager` before `StartHost()`
-- `static GameManager Instance`
+- `static GameManager Instance` — **do not read this from player/client code** (MPPM
+  unsafe, see `docs/PROJECT_OVERVIEW.md` gotcha #3); this `static` is tolerated here
+  because `GameManager` is server-only singleton logic, not per-player state.
 - `OnNetworkSpawn` (server): spawns one `playerPrefab` per connected client at `spawnPoints`
 - `RegisterPlayer` → assigns playerSlot, triggers `UpdateWaitingRoomClientRpc`, starts game when full
-- `EvaluateRound()`: server scores all players, checks ≥10 → `ShowWinnersClientRpc`
-- ClientRpcs: `UpdateWaitingRoomClientRpc`, `StartGameClientRpc`, `BeginTimerClientRpc`, `ShowWinnersClientRpc`
+- `EvaluateRound()`: server scores all players, checks ≥10 → builds the winner
+  announcement as a single formatted string server-side, sends via `ShowWinnersClientRpc(string message)`
+  (NGO RPCs can't serialize `string[]` — see `docs/PROJECT_OVERVIEW.md` gotcha #7)
+- ClientRpcs: `UpdateWaitingRoomClientRpc`, `StartGameClientRpc`, `BeginTimerClientRpc`, `ShowWinnersClientRpc(string)`
 
 ### `LobbyUIManager.cs` (MonoBehaviour, in GameMenu scene)
 - `SetLocalPlayer(ActionPlayerManager)` — called by `ActionPlayerManager.OnNetworkSpawn` on owner
 - `OnBodyColorButton(int)` / `OnWeaponColorButton(int)` — delegate to `localPlayer`
-- `UpdateWaitingRoom(int, int)` / `ShowGamePanel()` / `ShowWinners(int[])` — called by GameManager ClientRpcs
+- `UpdateWaitingRoom(int, int)` / `ShowGamePanel()` / `ShowWinners(string message)` — called by GameManager ClientRpcs
 - Panels: `menuPanel`, `createPanel`, `waitPanel`, `winPanel`
 
 ### `DragButton.cs`
@@ -76,14 +96,14 @@ GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
 ### `GameMenu.unity`
 - GO `NetworkRoot`: `NetworkManager` + `UnityTransport`
   - Enable **"Scene Management"** in NetworkManager
-  - Add `1v1` to **"Registered Scene Names"**
+  - Add `Arena` to **"Registered Scene Names"**
 - GO `SessionManager`: `SessionNetworkManager` script
 - Canvas with `LobbyUIManager` script + 4 panels wired in Inspector
 
 ### `Player.prefab`
 - Add `NetworkObject` to root GO
 
-### `1v1.unity`
+### `Arena.unity`
 - GO `GameManager`: `NetworkObject` + `GameManager` script
   - Assign: `timerImage`, `playerPrefab` (Player.prefab), `spawnPoints` (4 empty GOs)
 - 4 empty GOs positioned as spawn points, assigned to `GameManager.spawnPoints[]`
@@ -94,7 +114,7 @@ GameMenu.unity  →  (all players joined)  →  server loads 1v1.unity
 
 ### Build Settings
 - Scene 0: `GameMenu`
-- Scene 1: `1v1`
+- Scene 1: `Arena`
 
 ### `EnvironmentManager` (Arena.unity)
 `EnvironmentPresetManager` ya está creado. Setup All ahora rellena todo automáticamente:
