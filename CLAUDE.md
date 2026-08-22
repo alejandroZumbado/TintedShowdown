@@ -30,6 +30,24 @@ Platforms: PC, Android, WebGL. Published build: https://alejandrozumbado.github.
 - First player(s) to reach **10 points** win. Multiple simultaneous winners possible.
 - No ranking — just a winner announcement screen.
 
+## Commands
+
+There is no CLI build/lint/test workflow — this is a Unity project, driven from the Editor
+(`E:\versionesUnity\6000.3.13f1\Editor\Unity.exe`) or via `-executeMethod` for headless runs.
+No test framework is set up in `Assets/` (no `asmdef`, no `Tests/` folder).
+
+- **Setup wiring** (menu, run once per fresh scene state): `Tinted Showdown → Setup All (run once)`
+  → `TintedShowdownSetup.SetupAll()` in `Assets/Scripts/Editor/TintedShowdownSetup.cs`.
+  Idempotent — safe to re-run after adding scene/prefab content (see philosophy note below).
+  Headless equivalent (no dialogs): `-executeMethod TintedShowdownSetup.SetupAllHeadless`
+- **Build WebGL** (menu): `Tinted Showdown → Build WebGL` → `WebGLBuildScript.Build()`.
+  Headless:
+  ```
+  Unity.exe -batchmode -quit -projectPath "<repo>" -executeMethod WebGLBuildScript.Build
+  ```
+  Outputs to `E:\Users\Alejandro\Opal\Builds\Tinten Showdown` (separate git repo, deploys to
+  GitHub Pages — not part of this repo). Full deploy flow in `docs/PROJECT_OVERVIEW.md`.
+
 ## Network Stack
 
 | Package | Role |
@@ -84,8 +102,30 @@ GameMenu.unity  →  (all players joined)  →  server loads Arena.unity
 - `UpdateWaitingRoom(int, int)` / `ShowGamePanel()` / `ShowWinners(string message)` — called by GameManager ClientRpcs
 - Panels: `menuPanel`, `createPanel`, `waitPanel`, `winPanel`
 
+### `LobbyNetwork.cs` (NetworkBehaviour, scene-placed in `GameMenu.unity`)
+- `NetworkVariable<int> PlayerCount` / `MaxPlayers` — server write, synced lobby headcount
+- `Initialize(count, max)` / `SetPlayerCount(count)` — server-only, push via `PushCountClientRpc`
+  rather than relying on `OnValueChanged` (see `docs/PROJECT_OVERVIEW.md` gotcha #4)
+- Has a `static Instance` kept only for compatibility — do not read it from player/client code
+  (same MPPM hazard as `GameManager.Instance`); use `FindFirstObjectByType<LobbyNetwork>()`
+
+### `ColorButtonProxy.cs` (MonoBehaviour, on `Canvas.prefab` root)
+- Routes body/weapon color button clicks to `LobbyUIManager` via `FindFirstObjectByType`
+  (MPPM-safe indirection layer between UI buttons and the lobby singleton-ish manager)
+
+### `EnvironmentPresetManager.cs` (NetworkBehaviour, in `Arena.unity`)
+- Picks one of 3 `EnvironmentPreset` entries (Day/Night/Blend: skybox, fog, sun light,
+  `environment` rig rotation) via server-rolled `NetworkVariable<int>` in `OnNetworkSpawn`,
+  replicated to all clients — see `## EnvironmentManager` section below for setup status
+
 ### `DragButton.cs`
 - Touch drag gesture detector. `PerformButtonAction()` is a stub — not yet integrated.
+
+### `Assets/Scripts/Editor/TintedShowdownSetup.cs` and `WebGLBuildScript.cs`
+- Editor-only automation — see `## Commands` above. `TintedShowdownSetup` is idempotent
+  (adding a feature that needs new scene/prefab wiring: use the "Ensure" pattern — check
+  if it exists, create if not — never gate it behind an unrelated "if X is missing" block);
+  full philosophy in `docs/PROJECT_OVERVIEW.md`.
 
 ## Manual Unity Setup Required
 
