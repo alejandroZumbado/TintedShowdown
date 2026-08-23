@@ -80,6 +80,18 @@ public class ActionPlayerManager : NetworkBehaviour
     // toward their own point of view.
     private Camera billboardCamera;
 
+    // Set by GameManager (server-side, before Spawn()) for bot-controlled players.
+    // Needed because a bot is owned by the server, and on the host process the server
+    // IS the owner — so IsOwner alone can't tell a bot apart from the real local player.
+    private bool isBot;
+    private string botDisplayName;
+
+    public void MarkAsBot(string displayName)
+    {
+        isBot = true;
+        botDisplayName = displayName;
+    }
+
     // Flat materials swapped onto each part's renderers, cached once per renderer.
     // The character's baked texture has solid-black regions — multiplying that texture
     // by any tint color leaves it black (0 * anything = 0), so tinting the existing
@@ -147,39 +159,54 @@ public class ActionPlayerManager : NetworkBehaviour
 
         if (IsOwner)
         {
-            // Random starting colors — owner writes directly to their NetworkVariables
+            // Random starting colors — owner writes directly to their NetworkVariables.
+            // Applies to bots too: they need SOME starting colors, BotController takes
+            // over from here with criteria-driven picks once the round loop begins.
             bodyColor.Value = Random.Range(0, 4);
             weaponColor.Value = Random.Range(0, 4);
 
-            // The name UI in GameMenu guarantees this is set before a match can start —
-            // PlayerPrefs.GetString fallback only matters if something skipped that flow.
-            // FixedString32Bytes only holds ~28 UTF-8 bytes; clamp defensively since
-            // accented characters take 2 bytes each and would otherwise throw.
-            string savedName = PlayerPrefs.GetString("PlayerName", "Jugador");
-            if (savedName.Length > 16) savedName = savedName.Substring(0, 16);
-            playerName.Value = new FixedString32Bytes(savedName);
-
-            // FindFirstObjectByType is MPPM-safe (scoped per virtual player)
-            Object.FindFirstObjectByType<LobbyUIManager>()?.SetLocalPlayer(this);
-
-            // Switch to this player's own camera — every client otherwise shares the
-            // same static scene camera, so everyone sees the exact same fixed angle
-            // instead of looking at their own character.
-            //
-            // FindObjectsByType (not GameObject.FindWithTag!) is the MPPM-safe way to do
-            // this. Tag-based and other global lookups are NOT guaranteed to be scoped to
-            // the current virtual player in Multiplayer Play Mode — that's exactly the
-            // class of bug already documented for static fields in this project; it
-            // applies here too. FindObjectsByType only returns ACTIVE objects by default,
-            // and playerCamera starts disabled, so this reliably finds just this world's
-            // static scene camera and nothing belonging to another virtual player.
-            if (playerCamera != null)
+            if (isBot)
             {
-                foreach (var cam in FindObjectsByType<Camera>(FindObjectsSortMode.None))
+                // Bots are "owned" by the server too (no real client to own them), so
+                // this whole IsOwner block also runs for them on the host process — but
+                // none of the human-only UI/camera wiring below applies to a bot.
+                // Same 16-char clamp as the human path (FixedString32Bytes ~28 UTF-8 bytes).
+                string name = botDisplayName ?? "Bot";
+                if (name.Length > 16) name = name.Substring(0, 16);
+                playerName.Value = new FixedString32Bytes(name);
+            }
+            else
+            {
+                // The name UI in GameMenu guarantees this is set before a match can start —
+                // PlayerPrefs.GetString fallback only matters if something skipped that flow.
+                // FixedString32Bytes only holds ~28 UTF-8 bytes; clamp defensively since
+                // accented characters take 2 bytes each and would otherwise throw.
+                string savedName = PlayerPrefs.GetString("PlayerName", "Jugador");
+                if (savedName.Length > 16) savedName = savedName.Substring(0, 16);
+                playerName.Value = new FixedString32Bytes(savedName);
+
+                // FindFirstObjectByType is MPPM-safe (scoped per virtual player)
+                Object.FindFirstObjectByType<LobbyUIManager>()?.SetLocalPlayer(this);
+
+                // Switch to this player's own camera — every client otherwise shares the
+                // same static scene camera, so everyone sees the exact same fixed angle
+                // instead of looking at their own character.
+                //
+                // FindObjectsByType (not GameObject.FindWithTag!) is the MPPM-safe way to do
+                // this. Tag-based and other global lookups are NOT guaranteed to be scoped to
+                // the current virtual player in Multiplayer Play Mode — that's exactly the
+                // class of bug already documented for static fields in this project; it
+                // applies here too. FindObjectsByType only returns ACTIVE objects by default,
+                // and playerCamera starts disabled, so this reliably finds just this world's
+                // static scene camera and nothing belonging to another virtual player.
+                if (playerCamera != null)
                 {
-                    if (cam != playerCamera) cam.gameObject.SetActive(false);
+                    foreach (var cam in FindObjectsByType<Camera>(FindObjectsSortMode.None))
+                    {
+                        if (cam != playerCamera) cam.gameObject.SetActive(false);
+                    }
+                    playerCamera.gameObject.SetActive(true);
                 }
-                playerCamera.gameObject.SetActive(true);
             }
         }
 

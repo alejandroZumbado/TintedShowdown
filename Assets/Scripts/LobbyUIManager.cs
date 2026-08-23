@@ -27,6 +27,7 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] private GameObject waitPanel;
     [SerializeField] private GameObject winPanel;
     [SerializeField] private GameObject namePanel;
+    [SerializeField] private GameObject historyPanel;
 
     [Header("Name entry — shown once if no name is saved in PlayerPrefs")]
     [SerializeField] private TMP_InputField nameInput;
@@ -42,6 +43,9 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] private Button[] maxPlayerButtons;
     [SerializeField] private Button createRoomButton;
 
+    [Header("Solo vs Bots")]
+    [SerializeField] private Button playSoloButton;
+
     [Header("Join Room")]
     [SerializeField] private TMP_InputField joinCodeInput;
     [SerializeField] private Button joinRoomButton;
@@ -52,6 +56,9 @@ public class LobbyUIManager : MonoBehaviour
     [SerializeField] private Button playAgainButton;
     [SerializeField] private GameObject waitHostText;
 
+    [Header("Match History")]
+    [SerializeField] private TextMeshProUGUI historyStatsText;
+
     [Header("Error feedback")]
     [SerializeField] private GameObject errorToastRoot;
     [SerializeField] private TextMeshProUGUI errorText;
@@ -60,6 +67,7 @@ public class LobbyUIManager : MonoBehaviour
     private int selectedMaxPlayers = 2;
     private string _joinCode = string.Empty;
     private Coroutine _errorHideCoroutine;
+    private bool _lastMatchWasSolo;
     private const float ErrorToastSeconds = 3f;
 
     private void Awake()
@@ -154,6 +162,24 @@ public class LobbyUIManager : MonoBehaviour
 
     public void ShowMenuPanel()   => ShowPanel(menuPanel);
 
+    // Called by GameManager.MatchStartedClientRpc (fires exactly once per match/restart).
+    public void RecordMatchStarted(bool isSolo)
+    {
+        _lastMatchWasSolo = isSolo;
+        MatchStats.RecordMatchStarted(isSolo);
+    }
+
+    public void ShowHistoryPanel()
+    {
+        ShowPanel(historyPanel);
+        if (historyStatsText != null)
+        {
+            historyStatsText.text =
+                $"MODO SOLO\nJugadas: {MatchStats.OfflinePlayed}    Ganadas: {MatchStats.OfflineWon}\n\n" +
+                $"MODO ONLINE\nJugadas: {MatchStats.OnlinePlayed}    Ganadas: {MatchStats.OnlineWon}";
+        }
+    }
+
     public void ShowCreatePanel()
     {
         ShowPanel(createPanel);
@@ -225,6 +251,36 @@ public class LobbyUIManager : MonoBehaviour
         }
     }
 
+    public async void OnPlaySoloButton()
+    {
+        Debug.Log("[LobbyUI] OnPlaySoloButton");
+        string original = BeginLoading(playSoloButton, "Conectando...");
+
+        // Unlike CreateRoomAsync/JoinRoomAsync, CreateSoloRoomAsync loads the Arena scene
+        // immediately (there's no one else to wait for) — without switching off MenuPanel
+        // here first, it stays on screen, on top of the 3D Arena, for the whole scene-load
+        // + 3s pre-round countdown, until GameManager's StartGameClientRpc hides it. Same
+        // waitPanel the multiplayer flow already shows during that same window.
+        ShowPanel(waitPanel);
+        if (waitStatusText != null) waitStatusText.text = "Cargando partida...";
+        if (joinCodeDisplay != null) joinCodeDisplay.text = string.Empty; // no code to show in solo mode
+        if (copyCodeButton != null) copyCodeButton.gameObject.SetActive(false);
+
+        try
+        {
+            await SessionNetworkManager.Instance.CreateSoloRoomAsync();
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[LobbyUI] OnPlaySoloButton: {e}");
+            ShowError("No se pudo iniciar el modo solo. Probá de nuevo.");
+        }
+        finally
+        {
+            EndLoading(playSoloButton, original);
+        }
+    }
+
     public async void OnJoinRoomButton()
     {
         string code = joinCodeInput != null ? joinCodeInput.text.Trim() : string.Empty;
@@ -293,6 +349,14 @@ public class LobbyUIManager : MonoBehaviour
         waitPanel.SetActive(false);
         winPanel.SetActive(false);
         namePanel.SetActive(false);
+        if (historyPanel != null) historyPanel.SetActive(false);
+
+        // Arena's own Canvas (color buttons + timer) starts disabled — see
+        // TintedShowdownSetup.EnsureCanvasInScene — so it doesn't sit visible (and
+        // clickable) behind these lobby panels during the scene-load + pre-round
+        // countdown. This is the moment the round actually begins, so it comes back now.
+        // FindObjectsInactive.Include since it's inactive right up until this call.
+        UnityEngine.Object.FindFirstObjectByType<ColorButtonProxy>(FindObjectsInactive.Include)?.gameObject.SetActive(true);
     }
 
     // message comes fully formatted from GameManager (e.g. "¡Ana y Luis ganaron!") —
@@ -301,6 +365,13 @@ public class LobbyUIManager : MonoBehaviour
     {
         winPanel.SetActive(true);
         winnerText.text = message;
+
+        // score >= 10 (GameManager.WinScore) is the actual win condition — reading it
+        // off the synced NetworkVariable is more robust than parsing our own name out of
+        // the formatted message string. Also fires (harmlessly, correctly False) for the
+        // "opponents disconnected" end-of-match message GameManager.UnregisterPlayer sends.
+        if (localPlayer != null && localPlayer.score.Value >= 10)
+            MatchStats.RecordWin(_lastMatchWasSolo);
 
         // Only the host can restart — same connected roster, no reconnection needed
         bool isHost = NetworkManager.Singleton != null && NetworkManager.Singleton.IsHost;
@@ -339,6 +410,7 @@ public class LobbyUIManager : MonoBehaviour
         waitPanel.SetActive(target == waitPanel);
         winPanel.SetActive(target == winPanel);
         namePanel.SetActive(target == namePanel);
+        if (historyPanel != null) historyPanel.SetActive(target == historyPanel);
         HideError();
     }
 

@@ -44,11 +44,61 @@ public class SessionNetworkManager : MonoBehaviour
         Debug.Log($"[SNM] UGS ready. PlayerId={AuthenticationService.Instance.PlayerId}");
     }
 
+    // Vs 3 bots, no other real players needed — reuses the exact same Relay/host path as
+    // a normal room so it keeps working on every platform (WebGL included, since the
+    // host never has to listen on a local socket — Relay is the actual listener). Skips
+    // the wait-room entirely: the only real client (the host itself) is already
+    // connected, so there's nothing to wait for.
+    private const int SoloBotCount = 3;
+
+    public async Task CreateSoloRoomAsync()
+    {
+        try
+        {
+            await InitServicesAsync();
+
+            // 1 extra connection slot even though nobody else will ever join — mirrors
+            // the working CreateRoomAsync(2) path instead of trying an untested 0.
+            Allocation allocation = await RelayService.Instance.CreateAllocationAsync(1);
+            Debug.Log("[SNM] Solo relay allocation created.");
+            LogEndpoints(allocation.ServerEndpoints);
+
+            var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+            if (transport == null) { OnError?.Invoke("UnityTransport no encontrado."); return; }
+
+            transport.UseWebSockets = Application.platform == RuntimePlatform.WebGLPlayer;
+            transport.SetRelayServerData(BuildHostRelayData(allocation));
+
+            GameManager.BotCountToSpawn = SoloBotCount;
+            GameManager.MaxPlayersTarget = 1 + SoloBotCount;
+
+            // Same disconnect handling as a real room — if Relay drops the host's own
+            // connection mid-game, HandleDisconnect still surfaces it via OnHostLeft
+            // instead of leaving the player stuck with no feedback.
+            NetworkManager.Singleton.OnClientDisconnectCallback += HandleDisconnect;
+
+            bool started = NetworkManager.Singleton.StartHost();
+            Debug.Log($"[SNM] StartHost (solo) returned: {started}");
+            if (!started) { OnError?.Invoke("No se pudo iniciar el host."); return; }
+
+            LoadGameScene(); // no other real player to wait for
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[SNM] CreateSoloRoomAsync: {e}");
+            OnError?.Invoke("No se pudo iniciar el modo solo. Probá de nuevo.");
+        }
+    }
+
     public async Task CreateRoomAsync(int maxPlayers)
     {
         try
         {
             await InitServicesAsync();
+
+            // Defensive: clears any bot-mode flag left set by a prior solo session in
+            // this same app run, so a real room never spawns leftover bots.
+            GameManager.BotCountToSpawn = 0;
 
             Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxPlayers - 1);
             string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);

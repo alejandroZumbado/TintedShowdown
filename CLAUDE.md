@@ -71,6 +71,11 @@ GameMenu.unity  →  (all players joined)  →  server loads Arena.unity
 
 ### `SessionNetworkManager.cs` (MonoBehaviour, DontDestroyOnLoad)
 - `CreateRoomAsync(int maxPlayers)` → UGS login + Relay alloc + `StartHost()`
+- `CreateSoloRoomAsync()` → same Relay/host path as `CreateRoomAsync`, but for exactly 1
+  real player (the host) + 3 bots — sets `GameManager.BotCountToSpawn`/`MaxPlayersTarget`
+  before `StartHost()`, then skips the wait-room and calls `LoadGameScene()` immediately
+  (no other real client to wait for). Resets `GameManager.BotCountToSpawn = 0` on every
+  `CreateRoomAsync` call so a prior solo session never leaks bots into a real room.
 - `JoinRoomAsync(string code)` → UGS login + Relay join + `StartClient()`
 - `LoadGameScene()` → `NetworkManager.SceneManager.LoadScene("Arena", Single)` (server only)
 - Fires events: `OnRoomCreated(code)`, `OnJoinedRoom`, `OnHostLeft`, `OnError(msg)`
@@ -83,24 +88,78 @@ GameMenu.unity  →  (all players joined)  →  server loads Arena.unity
 - `NetworkVariable<int> playerSlot` — Server write (1–4)
 - `OnNetworkSpawn`: owner picks random starting colors; server calls `GameManager.RegisterPlayer`
 - `ChangeColor(int)` / `AttackColor(int)` — guard-checked `if (!IsOwner) return`
+- `MarkAsBot(string displayName)` — must be called by `GameManager` BEFORE
+  `NetworkObject.Spawn()`. Bots have no real owning client, so on the host process
+  `IsOwner` is `true` for them too (host is both server and default owner) — this flag is
+  what keeps a bot from stealing `SetLocalPlayer`/camera control from the real player
+  inside the `IsOwner` block of `OnNetworkSpawn`. Sets `playerName` to `displayName`
+  (picked from `GameManager.BotNamePool`, not `"Bot {n}"`) instead of reading `PlayerPrefs`.
+
+### `BotController.cs` (plain C# class, not a Component)
+- Created and driven entirely by `GameManager`, server-side only — one instance per bot.
+- `DecideWeapon(allPlayers)` / `DecideBody(allPlayers)`: independent — weapon = the body
+  color most common among opponents (maximize hits), body = the weapon color least common
+  among opponents (dodge), ties broken randomly. Split into two methods (instead of one
+  combined `Decide`) so `GameManager` can put each on its own timer — a shared timer made
+  every bot flip both colors in the same instant, which read as robotic/synced.
+- `Decide(allPlayers)`: convenience wrapper calling both — used for a bot's initial spawn
+  colors and for a "sniper" bot's single last-instant reveal (see `GameManager.RunBotsForRound`).
 
 ### `GameManager.cs` (NetworkBehaviour, scene-placed in `Arena.unity`)
 - `static int MaxPlayersTarget` — set by `SessionNetworkManager` before `StartHost()`
+- `static int BotCountToSpawn` — set by `SessionNetworkManager.CreateSoloRoomAsync()`
+  before `StartHost()`; reset to 0 in `OnNetworkDespawn` and defensively at the top of
+  `CreateRoomAsync`. How many bot players `OnNetworkSpawn` spawns itself, in addition to
+  one `playerPrefab` per real connected client.
 - `static GameManager Instance` — **do not read this from player/client code** (MPPM
   unsafe, see `docs/PROJECT_OVERVIEW.md` gotcha #3); this `static` is tolerated here
   because `GameManager` is server-only singleton logic, not per-player state.
-- `OnNetworkSpawn` (server): spawns one `playerPrefab` per connected client at `spawnPoints`
+- `BotNamePool` / `PickBotNames(count)` — ~50 names, sampled without repeats per match so
+  bots never show up as "Bot 1/2/3" on the win screen.
+- `OnNetworkSpawn` (server): spawns one `playerPrefab` per connected client at `spawnPoints`,
+  then `BotCountToSpawn` more, each marked via `ActionPlayerManager.MarkAsBot(name)` (solo mode)
+- `RunBotsForRound(float duration)` / `BotStatLoop(bot, duration, isWeapon)`: started once
+  per round (round 1 in `StartGameDelayed`, every later round at the top of `RoundLoop`).
+  Each bot's weapon and body color each run on their OWN `BotStatLoop` coroutine — random
+  starting phase (0-0.9s) + random re-decide interval (0.7-1.3s) per loop, so nothing lines
+  up between bots or between one bot's own weapon/body. A random ~15% of bots per round
+  (`SnipeChance`) skip this entirely and instead call `BotController.Decide` once, in the
+  last instant before `EvaluateRound` scores the round (a "sniped" late change).
 - `RegisterPlayer` → assigns playerSlot, triggers `UpdateWaitingRoomClientRpc`, starts game when full
+- `UnregisterPlayer` → also ends the match immediately (reusing `ShowWinnersClientRpc` with
+  a "los demás jugadores se desconectaron" message) once `players.Count <= 1` mid-match —
+  previously a match with 0-1 players left just softlocked (nobody left to ever reach 10).
+- `MatchStartedClientRpc(bool isSolo)` — fired once from `StartGameDelayed` (guarded to run
+  exactly once per match/restart, unlike `StartGameClientRpc` which fires twice on "Jugar de
+  nuevo"). Feeds `LobbyUIManager.RecordMatchStarted` → `MatchStats`.
 - `EvaluateRound()`: server scores all players, checks ≥10 → builds the winner
   announcement as a single formatted string server-side, sends via `ShowWinnersClientRpc(string message)`
   (NGO RPCs can't serialize `string[]` — see `docs/PROJECT_OVERVIEW.md` gotcha #7)
-- ClientRpcs: `UpdateWaitingRoomClientRpc`, `StartGameClientRpc`, `BeginTimerClientRpc`, `ShowWinnersClientRpc(string)`
+- ClientRpcs: `MatchStartedClientRpc(bool)`, `StartGameClientRpc`, `BeginTimerClientRpc`, `ShowWinnersClientRpc(string)`
+
+### `MatchStats.cs` (plain static class)
+- PlayerPrefs-backed local counters: `OfflinePlayed/Won` (solo vs bots) and
+  `OnlinePlayed/Won` (real multiplayer), tracked separately since they answer different
+  questions. `RecordMatchStarted(isSolo)` / `RecordWin(isSolo)` — written from
+  `LobbyUIManager` (see below), read by `LobbyUIManager.ShowHistoryPanel()`.
 
 ### `LobbyUIManager.cs` (MonoBehaviour, in GameMenu scene)
 - `SetLocalPlayer(ActionPlayerManager)` — called by `ActionPlayerManager.OnNetworkSpawn` on owner
 - `OnBodyColorButton(int)` / `OnWeaponColorButton(int)` — delegate to `localPlayer`
-- `UpdateWaitingRoom(int, int)` / `ShowGamePanel()` / `ShowWinners(string message)` — called by GameManager ClientRpcs
-- Panels: `menuPanel`, `createPanel`, `waitPanel`, `winPanel`
+- `OnPlaySoloButton()` — calls `SessionNetworkManager.CreateSoloRoomAsync()`; entry point
+  for "Jugar Solo (vs 3 Bots)", wired directly on `menuPanel` (`playSoloButton`), no
+  intermediate confirmation panel. Switches to `waitPanel` immediately (not just on scene
+  load) — without it, `menuPanel` stayed on screen through the scene-load + 3s pre-round
+  countdown, on top of the already-loaded Arena.
+- `RecordMatchStarted(bool isSolo)` — called by `GameManager.MatchStartedClientRpc`, writes
+  through to `MatchStats`. `ShowHistoryPanel()` — formats `MatchStats` into `historyStatsText`.
+- `ShowWinners(string message)` — also records a win in `MatchStats` when
+  `localPlayer.score.Value >= 10` (more robust than parsing the formatted message string).
+- `UpdateWaitingRoom(int, int)` / `ShowGamePanel()` — called by GameManager ClientRpcs.
+  `ShowGamePanel()` also re-enables Arena's own Canvas (color buttons + timer), which
+  `TintedShowdownSetup.EnsureCanvasInScene` now leaves disabled by default — otherwise it
+  sat visible/clickable behind the lobby panels during the scene-load + countdown window.
+- Panels: `menuPanel`, `createPanel`, `waitPanel`, `winPanel`, `namePanel`, `historyPanel`
 
 ### `LobbyNetwork.cs` (NetworkBehaviour, scene-placed in `GameMenu.unity`)
 - `NetworkVariable<int> PlayerCount` / `MaxPlayers` — server write, synced lobby headcount
@@ -117,9 +176,6 @@ GameMenu.unity  →  (all players joined)  →  server loads Arena.unity
 - Picks one of 3 `EnvironmentPreset` entries (Day/Night/Blend: skybox, fog, sun light,
   `environment` rig rotation) via server-rolled `NetworkVariable<int>` in `OnNetworkSpawn`,
   replicated to all clients — see `## EnvironmentManager` section below for setup status
-
-### `DragButton.cs`
-- Touch drag gesture detector. `PerformButtonAction()` is a stub — not yet integrated.
 
 ### `Assets/Scripts/Editor/TintedShowdownSetup.cs` and `WebGLBuildScript.cs`
 - Editor-only automation — see `## Commands` above. `TintedShowdownSetup` is idempotent

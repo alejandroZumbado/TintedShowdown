@@ -129,14 +129,24 @@ bloque que solo corre "si tal cosa no existe".
 Sí se fuerza siempre a propósito (son invariantes/bugfixes, no contenido del usuario):
 limpieza de jugadores manuales en Arena, `PlayerPrefab = null`, lock de orientación landscape.
 
-## Estado funcional al día de la recuperación (2026-08-18, según memoria previa — verificar)
+## Estado funcional (actualizado 2026-08-22, sesión modo solo vs bots)
 
 - Conexión online vía Relay: funciona (Editor, standalone, WebGL — WebGL con fix aplicado y retesteado en vivo)
 - Lobby: crear sala + join por código, ambiente día/noche sincronizado
 - Colores body/weapon, cámara por jugador, timer, rondas, pantalla de ganadores, nombre real de jugador
+- **Modo solo vs 3 bots** (nuevo, 2026-08-22): botón "Jugar Solo" en el menú, crea sala
+  Relay solo para el host (sigue requiriendo internet — no es offline literal, ver
+  `## Modo Solo vs Bots` más abajo) y spawnea 3 bots server-side con nombres random
+  (`GameManager.BotNamePool`, sin repetir por partida) que van cambiando de color en vivo
+  (timers independientes por bot y por arma/armadura, ~15% de jugada tardía)
+- **Historial de partidas** (nuevo): botón en el menú, cuenta jugadas/ganadas separado
+  para modo solo vs online (`MatchStats.cs`, PlayerPrefs local)
+- **Fix de softlock** (nuevo): si quedan 0-1 jugadores conectados a mitad de partida,
+  la partida termina sola y muestra la pantalla de fin con botón "Volver al Menú" (antes
+  se quedaba pegada para siempre — ver pendiente de abajo, ahora resuelto)
 - Build WebGL público y funcionando
 
-**Pendiente / sin confirmar (puede haber cambiado — son los últimos commits antes de la pérdida local):**
+**Pendiente / sin confirmar:**
 - Reacomodo manual de decoración en `Arena.unity` (el auto-despeje por radio se quitó,
   el usuario iba a hacerlo a mano en el Editor — commit `2993f20` "Fix piso invisible"
   sugiere que esto ya se resolvió, pero no hay build WebGL redeployado con ese fix confirmado)
@@ -145,10 +155,27 @@ limpieza de jugadores manuales en Arena, `PlayerPrefab = null`, lock de orientac
 - Fix de Relay en build standalone (PC) real — nunca se testeó end-to-end, solo WebGL
 - Android — sin probar
 - Performance con 3-4 jugadores simultáneos
-- Softlock si quedan 1 o 0 jugadores conectados a mitad de partida — identificado, no arreglado
-- Sin límite de rondas/empate si nadie llega a 10 puntos
+- ~~Softlock si quedan 1 o 0 jugadores conectados a mitad de partida~~ — **arreglado 2026-08-22**
+- Sin límite de rondas/empate si nadie llega a 10 puntos — sigue pendiente
 - Aislamiento de `PlayerPrefs` (nombre de jugador) entre Virtual Players de MPPM — sin confirmar
   (solución propuesta no implementada: sufijar la key con el argumento `-name` de MPPM)
+- El flujo online (crear sala / entrar con 2+ jugadores reales) no se retesteó en vivo con
+  2 clientes reales después de los cambios de esta sesión — se revisó el código a fondo
+  (los cambios de `GameManager`/`LobbyUIManager`/`SessionNetworkManager` para el modo solo
+  quedan detrás de `BotCountToSpawn == 0` o son aditivos) pero falta la confirmación real
+- Remote de git actualizado a `alejandroZumbado/TintedShowdown` — pendiente que el usuario
+  lo corra a mano (bloqueado por el harness de Claude Code, ver sesión 2026-08-22)
+
+## Modo Solo vs Bots (2026-08-22)
+
+Decisión tomada con el usuario: "offline" se resuelve como **solo vs bots vía Relay**, no
+como modo 100% sin internet. Sigue usando la misma infraestructura UGS/Relay de siempre
+(el host crea una sala para 1 jugador real y el propio servidor spawnea 3 bots), lo que
+evitó duplicar toda la lógica de partida en una rama de código paralela no-networked.
+Se descartó a propósito el offline literal — hubiera requerido separar pintado/cámara/
+scoring de `ActionPlayerManager` en componentes no-networked, mucho más riesgo para el
+mismo resultado percibido por el jugador. Detalle técnico completo en `CLAUDE.md`
+(`BotController.cs`, `GameManager.RunBotsForRound`/`BotStatLoop`, `MatchStats.cs`).
 
 ## Build / deploy — flujo completo
 

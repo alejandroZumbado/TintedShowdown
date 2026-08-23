@@ -25,6 +25,29 @@ public static class TintedShowdownSetup
     // Circle radius for spawn points (meters from center)
     private const float SpawnRadius = 5f;
 
+    // ── Lobby UI palette ──────────────────────────────────────────────────────
+    // One cohesive dark-navy theme across every panel, with two accent colors used
+    // to tell apart the two very different actions on MenuPanel: joining the online
+    // flow (blue) vs. playing immediately against bots (warm orange). Neutral buttons
+    // (Volver, Copiar, the player-count picker LobbyUIManager recolors itself, etc.)
+    // keep the plain off-white look.
+    // Fully opaque (alpha 255) — a translucent overlay let the Arena scene/buttons bleed
+    // through visibly behind WaitPanel during the solo-mode loading window.
+    private static readonly Color32 PanelBackgroundColor = new Color32(16, 20, 32, 255);
+    private static readonly Color32 AccentPrimaryColor    = new Color32(66, 153, 255, 255);
+    private static readonly Color32 AccentSoloColor       = new Color32(255, 140, 66, 255);
+    private static readonly Color32 NeutralButtonColor    = new Color32(235, 238, 245, 235);
+
+    // LobbyCanvas (DontDestroyOnLoad) and Arena's own Canvas.prefab are both
+    // Screen Space - Overlay at the default sortingOrder (0) — Unity breaks that tie in
+    // favor of whichever was touched most recently, which after a scene load is Arena's
+    // freshly-instantiated Canvas. That let Arena's gameplay UI (color buttons, score,
+    // timer) render THROUGH LobbyCanvas's WaitPanel/"Cargando partida..." overlay instead
+    // of being hidden behind it during the scene-load + pre-round countdown window.
+    // LobbyCanvas must always win, since it's the one that has to cover the screen while
+    // a new scene finishes loading.
+    private const int LobbyCanvasSortingOrder = 100;
+
     [MenuItem("Tinted Showdown/Setup All (run once)")]
     public static void SetupAll()
     {
@@ -89,6 +112,24 @@ public static class TintedShowdownSetup
             AssetDatabase.DeleteAsset(arenaLightingDataFolder);
 
         Debug.Log("[Reset] Environment rig cleared — run Setup All to recreate it.");
+    }
+
+    // Wipes the whole LobbyCanvas so the next Setup All rebuilds it from scratch with
+    // the current CreateLobbyCanvas() design — useful whenever that method's layout/
+    // colors change after the canvas already exists once, since Setup All otherwise
+    // leaves an existing LobbyCanvas alone (see CreateLobbyCanvas's "already exists"
+    // guard in SetupGameMenuScene). Same pattern as ResetEnvironmentRig above.
+    [MenuItem("Tinted Showdown/Reset Lobby Canvas (dev)")]
+    public static void ResetLobbyCanvas()
+    {
+        var scene = EditorSceneManager.OpenScene(MenuScenePath, OpenSceneMode.Single);
+        var canvasGO = GameObject.Find("LobbyCanvas");
+        if (canvasGO == null) { Debug.LogWarning("[Reset] LobbyCanvas not found"); return; }
+
+        Object.DestroyImmediate(canvasGO);
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log("[Reset] LobbyCanvas cleared — run Setup All to recreate it.");
     }
 
     // Testing utility: clears the saved player name (and anything else stored in
@@ -528,6 +569,8 @@ public static class TintedShowdownSetup
             Debug.Log("[Setup] LobbyCanvas already exists — leaving it as-is");
         }
 
+        EnsureLobbyCanvasSortOrder(lobbyCanvasGO);
+
         // Added after the rest of the lobby UI already existed in some projects — add it
         // on its own without touching (or requiring you to delete) an existing LobbyCanvas.
         EnsureNamePanel(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
@@ -541,14 +584,37 @@ public static class TintedShowdownSetup
         // "Ensure" pattern as above.
         EnsureWaitPanelCancelButton(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
 
+        // Match history (played/won, solo vs online) — same "Ensure" pattern.
+        EnsureHistoryPanel(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
+        EnsureHistoryButton(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
+
         // Selection outline on the 2/3/4-player buttons + loading-state refs for
         // Crear Sala / Entrar. Always re-run (idempotent), not gated behind "only if
         // LobbyCanvas is new" like the button wiring above it.
         EnsureSelectionAndLoadingUx(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
 
+        // "Jugar Solo (vs 3 Bots)" entry point — same "Ensure" pattern as the panels
+        // above, only adds it if missing.
+        EnsureSoloButton(lobbyCanvasGO, lobbyCanvasGO.GetComponent<LobbyUIManager>());
+
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("[Setup] GameMenu.unity saved");
+    }
+
+    // See LobbyCanvasSortingOrder above for why this needs to always win over any
+    // scene-specific Canvas. Idempotent and unconditional (unlike most Ensure* methods
+    // here) — there's no legitimate reason a hand-tweak would ever want a different
+    // value, so it's safe to just re-apply it every run.
+    private static void EnsureLobbyCanvasSortOrder(GameObject lobbyCanvasGO)
+    {
+        var canvas = lobbyCanvasGO.GetComponent<Canvas>();
+        if (canvas == null) return;
+        if (canvas.sortingOrder == LobbyCanvasSortingOrder) return;
+
+        canvas.sortingOrder = LobbyCanvasSortingOrder;
+        EditorUtility.SetDirty(canvas);
+        Debug.Log($"[Setup] LobbyCanvas sortingOrder set to {LobbyCanvasSortingOrder} (must render above Arena's own Canvas)");
     }
 
     private static GameObject CreateLobbyCanvas()
@@ -556,26 +622,54 @@ public static class TintedShowdownSetup
         var canvasGO = new GameObject("LobbyCanvas");
         var canvas   = canvasGO.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = LobbyCanvasSortingOrder;
         ApplyLandscapeScaler(canvasGO.AddComponent<CanvasScaler>());
         canvasGO.AddComponent<GraphicRaycaster>();
         var lobbyUI = canvasGO.AddComponent<LobbyUIManager>();
 
-        var menuPanel   = MakePanel(canvasGO, "MenuPanel",   new Color32(30,  30,  30,  220));
-        var createPanel = MakePanel(canvasGO, "CreatePanel", new Color32(20,  50,  80,  220));
-        var waitPanel   = MakePanel(canvasGO, "WaitPanel",   new Color32(20,  70,  50,  220));
-        var winPanel    = MakePanel(canvasGO, "WinPanel",    new Color32(80,  65,  10,  220));
+        var menuPanel   = MakePanel(canvasGO, "MenuPanel",   PanelBackgroundColor);
+        var createPanel = MakePanel(canvasGO, "CreatePanel", PanelBackgroundColor);
+        var waitPanel   = MakePanel(canvasGO, "WaitPanel",   PanelBackgroundColor);
+        var winPanel    = MakePanel(canvasGO, "WinPanel",    PanelBackgroundColor);
+        var historyPanel = MakePanel(canvasGO, "HistoryPanel", PanelBackgroundColor);
 
-        // ── MenuPanel ──
-        MakeButton(menuPanel, "BtnShowCreate", "Crear Sala",  new Vector2(0,  95));
-        var joinInput = MakeInputField(menuPanel, "JoinCodeInput", "Contraseña de sala...", new Vector2(0, 0));
-        MakeButton(menuPanel, "BtnJoinConfirm", "Entrar",     new Vector2(0, -95));
+        // ── MenuPanel ── stacked in a VerticalLayoutGroup instead of hand-placed
+        // anchoredPosition values — spacing is computed from each child's own height,
+        // so it can never overlap regardless of how many buttons live here or what
+        // aspect ratio the screen is.
+        var menuContent = MakeVerticalGroup(menuPanel, "MenuContent", spacing: 22f, width: 460f);
+
+        var title = MakeText(menuContent, "Title", "TINTED SHOWDOWN", Vector2.zero, 40,
+            new Color32(255, 205, 40, 255));
+        title.fontStyle = FontStyles.Bold;
+        title.rectTransform.sizeDelta = new Vector2(460, 56);
+
+        var showCreateBtn = MakeButton(menuContent, "BtnShowCreate", "Crear Sala", Vector2.zero,
+            AccentPrimaryColor, Color.white);
+        var joinInput = MakeInputField(menuContent, "JoinCodeInput", "Contraseña de sala...", Vector2.zero);
+        var joinBtn = MakeButton(menuContent, "BtnJoinConfirm", "Entrar", Vector2.zero);
+
+        var divider = MakeText(menuContent, "Divider", "— o jugá sin conexión —", Vector2.zero, 18,
+            new Color32(190, 195, 210, 190));
+        divider.rectTransform.sizeDelta = new Vector2(400, 30);
+
+        var soloBtn = MakeButton(menuContent, "BtnPlaySolo", "Jugar Solo (vs 3 Bots)", Vector2.zero,
+            AccentSoloColor, Color.white);
+        var historyBtn = MakeButton(menuContent, "BtnHistory", "Historial de Partidas", Vector2.zero);
+
+        // ── HistoryPanel ──
+        MakeText(historyPanel, "Title", "Historial de Partidas", new Vector2(0, 160), 32, Color.white);
+        var historyStats = MakeText(historyPanel, "StatsText", "", new Vector2(0, 20), 26, Color.white);
+        historyStats.rectTransform.sizeDelta = new Vector2(560, 220);
+        var historyBackBtn = MakeButton(historyPanel, "BtnBackHistory", "← Volver", new Vector2(0, -190));
 
         // ── CreatePanel ── (wider spread between the 3 buttons — landscape has room)
         MakeText(createPanel, "Title", "¿Cuántos jugadores?", new Vector2(0, 150), 32, Color.white);
         var btn2p = MakeButton(createPanel, "Btn2P", "2 Jugadores", new Vector2(-280, 45));
         var btn3p = MakeButton(createPanel, "Btn3P", "3 Jugadores", new Vector2(    0, 45));
         var btn4p = MakeButton(createPanel, "Btn4P", "4 Jugadores", new Vector2(  280, 45));
-        MakeButton(createPanel, "BtnCreate",     "Crear Sala",      new Vector2(    0, -50));
+        var createBtn = MakeButton(createPanel, "BtnCreate", "Crear Sala", new Vector2(0, -50),
+            AccentPrimaryColor, Color.white);
         MakeButton(createPanel, "BtnBackCreate", "← Volver",        new Vector2(    0, -140));
 
         // ── WaitPanel ──
@@ -590,7 +684,8 @@ public static class TintedShowdownSetup
 
         // ── WinPanel ──
         var winnerText   = MakeText(winPanel, "WinnerText", "¡Jugador X ganó!", new Vector2(0, 95), 42, Color.yellow);
-        var playAgainBtn = MakeButton(winPanel, "BtnPlayAgain", "Jugar de nuevo", new Vector2(0, -25));
+        var playAgainBtn = MakeButton(winPanel, "BtnPlayAgain", "Jugar de nuevo", new Vector2(0, -25),
+            AccentPrimaryColor, Color.white);
         var waitHostText = MakeText(winPanel, "WaitHostText", "Esperando a que el host reinicie...",
                                      new Vector2(0, -25), 22, new Color32(200, 200, 200, 200));
         var backBtn      = MakeButton(winPanel, "BtnBackToMenu", "Volver al Menú", new Vector2(0, -120));
@@ -599,12 +694,12 @@ public static class TintedShowdownSetup
         WireVoidButton(copyBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnCopyCodeButton));
         WireVoidButton(backBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnBackToMenuPublic));
         WireVoidButton(playAgainBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnPlayAgainButton));
-        WireVoidButton(menuPanel.transform.Find("BtnShowCreate")?.GetComponent<Button>(),
-                       lobbyUI, nameof(LobbyUIManager.ShowCreatePanel));
-        WireVoidButton(menuPanel.transform.Find("BtnJoinConfirm")?.GetComponent<Button>(),
-                       lobbyUI, nameof(LobbyUIManager.OnJoinRoomButton));
-        WireVoidButton(createPanel.transform.Find("BtnCreate")?.GetComponent<Button>(),
-                       lobbyUI, nameof(LobbyUIManager.OnCreateRoomButton));
+        WireVoidButton(showCreateBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.ShowCreatePanel));
+        WireVoidButton(joinBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnJoinRoomButton));
+        WireVoidButton(soloBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnPlaySoloButton));
+        WireVoidButton(historyBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.ShowHistoryPanel));
+        WireVoidButton(historyBackBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.ShowMenuPanel));
+        WireVoidButton(createBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnCreateRoomButton));
         WireVoidButton(createPanel.transform.Find("BtnBackCreate")?.GetComponent<Button>(),
                        lobbyUI, nameof(LobbyUIManager.ShowMenuPanel));
 
@@ -616,6 +711,7 @@ public static class TintedShowdownSetup
         createPanel.SetActive(false);
         waitPanel.SetActive(false);
         winPanel.SetActive(false);
+        historyPanel.SetActive(false);
 
         // Assign serialized references to LobbyUIManager
         var so = new SerializedObject(lobbyUI);
@@ -623,6 +719,8 @@ public static class TintedShowdownSetup
         so.FindProperty("createPanel").objectReferenceValue      = createPanel;
         so.FindProperty("waitPanel").objectReferenceValue        = waitPanel;
         so.FindProperty("winPanel").objectReferenceValue         = winPanel;
+        so.FindProperty("historyPanel").objectReferenceValue     = historyPanel;
+        so.FindProperty("historyStatsText").objectReferenceValue = historyStats;
         so.FindProperty("joinCodeDisplay").objectReferenceValue  = joinCodeDisplay;
         so.FindProperty("copyCodeButton").objectReferenceValue   = copyBtn.GetComponent<Button>();
         so.FindProperty("waitStatusText").objectReferenceValue   = waitStatusText;
@@ -631,6 +729,16 @@ public static class TintedShowdownSetup
         so.FindProperty("backToMenuButton").objectReferenceValue = backBtn.GetComponent<Button>();
         so.FindProperty("playAgainButton").objectReferenceValue  = playAgainBtn.GetComponent<Button>();
         so.FindProperty("waitHostText").objectReferenceValue     = waitHostText.gameObject;
+        so.FindProperty("createRoomButton").objectReferenceValue = createBtn.GetComponent<Button>();
+        so.FindProperty("joinRoomButton").objectReferenceValue   = joinBtn.GetComponent<Button>();
+        so.FindProperty("playSoloButton").objectReferenceValue   = soloBtn.GetComponent<Button>();
+
+        var maxPlayerButtonsProp = so.FindProperty("maxPlayerButtons");
+        maxPlayerButtonsProp.arraySize = 3;
+        maxPlayerButtonsProp.GetArrayElementAtIndex(0).objectReferenceValue = btn2p.GetComponent<Button>();
+        maxPlayerButtonsProp.GetArrayElementAtIndex(1).objectReferenceValue = btn3p.GetComponent<Button>();
+        maxPlayerButtonsProp.GetArrayElementAtIndex(2).objectReferenceValue = btn4p.GetComponent<Button>();
+
         so.ApplyModifiedProperties();
 
         Debug.Log("[Setup] LobbyCanvas created");
@@ -648,11 +756,12 @@ public static class TintedShowdownSetup
             return;
         }
 
-        var namePanel = MakePanel(canvasGO, "NamePanel", new Color32(40, 30, 60, 220));
+        var namePanel = MakePanel(canvasGO, "NamePanel", PanelBackgroundColor);
         MakeText(namePanel, "NameTitle", "¿Cómo te llamas?", new Vector2(0, 90), 32, Color.white);
         var nameInput = MakeInputField(namePanel, "NameInput", "Tu nombre...", new Vector2(0, 0));
         nameInput.characterLimit = 16; // must match the FixedString32Bytes clamp in ActionPlayerManager
-        var confirmBtn = MakeButton(namePanel, "BtnConfirmName", "Confirmar", new Vector2(0, -90));
+        var confirmBtn = MakeButton(namePanel, "BtnConfirmName", "Confirmar", new Vector2(0, -90),
+            AccentPrimaryColor, Color.white);
         WireVoidButton(confirmBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnConfirmNameButton));
         namePanel.SetActive(false);
 
@@ -807,6 +916,93 @@ public static class TintedShowdownSetup
         so.ApplyModifiedProperties();
 
         Debug.Log("[Setup] ErrorToast added to LobbyCanvas");
+    }
+
+    // Adds a "Jugar Solo (vs 3 Bots)" button straight to MenuPanel — skips the
+    // create/join flow entirely, no other real players required. Same "only add if
+    // missing" pattern as EnsureWaitPanelCancelButton so re-running Setup All never
+    // disturbs a menu that already has it.
+    private static void EnsureSoloButton(GameObject canvasGO, LobbyUIManager lobbyUI)
+    {
+        var menuPanelTf = canvasGO.transform.Find("MenuPanel");
+        if (menuPanelTf == null)
+        {
+            Debug.LogWarning("[Setup] MenuPanel not found — skipping solo button");
+            return;
+        }
+
+        // Deep search (not a fixed path) so this stays correct on a fresh canvas built by
+        // CreateLobbyCanvas() (BtnPlaySolo lives under "MenuPanel/MenuContent" there) as
+        // well as an older canvas from before MenuContent existed.
+        var existing = menuPanelTf.GetComponentsInChildren<Button>(true)
+            .FirstOrDefault(b => b.gameObject.name == "BtnPlaySolo");
+        if (existing != null)
+        {
+            Debug.Log("[Setup] BtnPlaySolo already exists — leaving it as-is");
+            return;
+        }
+
+        var menuContentTf = menuPanelTf.Find("MenuContent");
+        var parent = menuContentTf != null ? menuContentTf.gameObject : menuPanelTf.gameObject;
+        var soloBtn = MakeButton(parent, "BtnPlaySolo", "Jugar Solo (vs 3 Bots)", new Vector2(0, -180),
+            AccentSoloColor, Color.white);
+        WireVoidButton(soloBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.OnPlaySoloButton));
+
+        var so = new SerializedObject(lobbyUI);
+        so.FindProperty("playSoloButton").objectReferenceValue = soloBtn.GetComponent<Button>();
+        so.ApplyModifiedProperties();
+
+        Debug.Log("[Setup] BtnPlaySolo added to MenuPanel");
+    }
+
+    // Same "only add if missing" pattern as EnsureSoloButton/EnsureWaitPanelCancelButton.
+    private static void EnsureHistoryPanel(GameObject canvasGO, LobbyUIManager lobbyUI)
+    {
+        if (canvasGO.transform.Find("HistoryPanel") != null)
+        {
+            Debug.Log("[Setup] HistoryPanel already exists — leaving it as-is");
+            return;
+        }
+
+        var historyPanel = MakePanel(canvasGO, "HistoryPanel", PanelBackgroundColor);
+        MakeText(historyPanel, "Title", "Historial de Partidas", new Vector2(0, 160), 32, Color.white);
+        var statsText = MakeText(historyPanel, "StatsText", "", new Vector2(0, 20), 26, Color.white);
+        statsText.rectTransform.sizeDelta = new Vector2(560, 220);
+        var backBtn = MakeButton(historyPanel, "BtnBackHistory", "← Volver", new Vector2(0, -190));
+        WireVoidButton(backBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.ShowMenuPanel));
+        historyPanel.SetActive(false);
+
+        var so = new SerializedObject(lobbyUI);
+        so.FindProperty("historyPanel").objectReferenceValue = historyPanel;
+        so.FindProperty("historyStatsText").objectReferenceValue = statsText;
+        so.ApplyModifiedProperties();
+
+        Debug.Log("[Setup] HistoryPanel added to LobbyCanvas");
+    }
+
+    private static void EnsureHistoryButton(GameObject canvasGO, LobbyUIManager lobbyUI)
+    {
+        var menuPanelTf = canvasGO.transform.Find("MenuPanel");
+        if (menuPanelTf == null)
+        {
+            Debug.LogWarning("[Setup] MenuPanel not found — skipping history button");
+            return;
+        }
+
+        var existing = menuPanelTf.GetComponentsInChildren<Button>(true)
+            .FirstOrDefault(b => b.gameObject.name == "BtnHistory");
+        if (existing != null)
+        {
+            Debug.Log("[Setup] BtnHistory already exists — leaving it as-is");
+            return;
+        }
+
+        var menuContentTf = menuPanelTf.Find("MenuContent");
+        var parent = menuContentTf != null ? menuContentTf.gameObject : menuPanelTf.gameObject;
+        var historyBtn = MakeButton(parent, "BtnHistory", "Historial de Partidas", new Vector2(0, -260));
+        WireVoidButton(historyBtn.GetComponent<Button>(), lobbyUI, nameof(LobbyUIManager.ShowHistoryPanel));
+
+        Debug.Log("[Setup] BtnHistory added to MenuPanel");
     }
 
     // ─── Arena.unity ──────────────────────────────────────────────────────────
@@ -1035,13 +1231,17 @@ public static class TintedShowdownSetup
 
     private static void EnsureCanvasInScene()
     {
-        var existingProxy = Object.FindFirstObjectByType<ColorButtonProxy>();
+        // FindObjectsInactive.Include: this GameObject is forced inactive below (every
+        // run), so a plain active-only search would never find it on the 2nd+ Setup All
+        // run and would instantiate a duplicate Canvas.prefab every time.
+        var existingProxy = Object.FindFirstObjectByType<ColorButtonProxy>(FindObjectsInactive.Include);
         if (existingProxy != null)
         {
             // Re-wire even if already present — fixes a stale per-instance OnClick
             // override (m_Target nulled out) that a Canvas placed before
             // ColorButtonProxy existed would otherwise keep forever.
             RewireColorButtons(existingProxy.gameObject, existingProxy);
+            existingProxy.gameObject.SetActive(false);
             Debug.Log("[Setup] Canvas.prefab already in Arena — re-wired buttons");
             return;
         }
@@ -1051,6 +1251,12 @@ public static class TintedShowdownSetup
         var instance = (GameObject)PrefabUtility.InstantiatePrefab(canvasPrefab);
         var proxy = instance.GetComponent<ColorButtonProxy>() ?? instance.AddComponent<ColorButtonProxy>();
         RewireColorButtons(instance, proxy);
+        // Starts hidden — the color buttons/timer would otherwise sit fully visible (and
+        // clickable) behind LobbyUIManager's WaitPanel/loading overlay for the whole
+        // scene-load + pre-round countdown. LobbyUIManager.ShowGamePanel() re-enables this
+        // at the exact moment the round visually begins, same as it already does for the
+        // lobby panels.
+        instance.SetActive(false);
         Debug.Log("[Setup] Canvas.prefab placed in Arena and wired");
     }
 
@@ -1080,8 +1286,10 @@ public static class TintedShowdownSetup
             Debug.Log("[Setup] Old standalone TimerCanvas removed");
         }
 
-        // The timer lives inside Canvas.prefab's own Canvas — no second Canvas needed
-        var proxy = Object.FindFirstObjectByType<ColorButtonProxy>();
+        // The timer lives inside Canvas.prefab's own Canvas — no second Canvas needed.
+        // FindObjectsInactive.Include: EnsureCanvasInScene (runs just before this) leaves
+        // the instance inactive by default now, so an active-only search would miss it.
+        var proxy = Object.FindFirstObjectByType<ColorButtonProxy>(FindObjectsInactive.Include);
         var mainCanvas = proxy != null ? proxy.GetComponent<Canvas>() : null;
         if (mainCanvas == null)
         {
@@ -1212,28 +1420,70 @@ public static class TintedShowdownSetup
         return go;
     }
 
-    private static GameObject MakeButton(GameObject parent, string name, string label, Vector2 pos)
+    // bgColor/textColor are optional so every existing call site keeps compiling and
+    // gets the same neutral off-white look as before (just rounded now) — only the
+    // buttons that need a specific accent (Crear Sala, Jugar Solo, etc.) pass them.
+    private static GameObject MakeButton(GameObject parent, string name, string label, Vector2 pos,
+        Color32? bgColor = null, Color? textColor = null)
     {
         var go  = new GameObject(name);
         go.transform.SetParent(parent.transform, false);
         var img = go.AddComponent<Image>();
-        img.color = new Color32(255, 255, 255, 200);
+        // Built-in 9-sliced rounded-rect sprite — free rounded-corner look with no
+        // custom art asset needed. Sliced (not Simple) so it scales without stretching
+        // the corners.
+        img.sprite = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+        img.type   = Image.Type.Sliced;
+        img.color  = bgColor ?? NeutralButtonColor;
         go.AddComponent<Button>();
         var rt = go.GetComponent<RectTransform>();
-        rt.sizeDelta        = new Vector2(340, 70);
+        rt.sizeDelta        = new Vector2(340, 76);
         rt.anchoredPosition = pos;
 
         var txtGO = new GameObject("Label");
         txtGO.transform.SetParent(go.transform, false);
         var tmp   = txtGO.AddComponent<TextMeshProUGUI>();
         tmp.text      = label;
-        tmp.color     = Color.black;
-        tmp.fontSize  = 26;
+        tmp.color     = textColor ?? Color.black;
+        tmp.fontSize  = 27;
+        tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
         var trt = txtGO.GetComponent<RectTransform>();
         trt.anchorMin = Vector2.zero;
         trt.anchorMax = Vector2.one;
-        trt.offsetMin = trt.offsetMax = Vector2.zero;
+        trt.offsetMin = new Vector2(12, 0);
+        trt.offsetMax = new Vector2(-12, 0); // side padding so long labels don't touch the rounded edges
+        return go;
+    }
+
+    // Vertical stack container: children keep their own width/height (childControl*
+    // = false), the group only spaces and centers them, and ContentSizeFitter sizes
+    // the container to fit — so it never overlaps regardless of how many children get
+    // added or what aspect ratio the screen is, unlike manually-tuned anchoredPosition
+    // values (which is exactly what caused BtnPlaySolo to overlap BtnJoinConfirm before
+    // this rewrite).
+    private static GameObject MakeVerticalGroup(GameObject parent, string name, float spacing, float width)
+    {
+        var go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent.transform, false);
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(width, 0f);
+        rt.anchoredPosition = Vector2.zero;
+
+        var vlg = go.AddComponent<VerticalLayoutGroup>();
+        vlg.spacing = spacing;
+        vlg.childAlignment = TextAnchor.MiddleCenter;
+        vlg.childControlWidth = false;
+        vlg.childControlHeight = false;
+        vlg.childForceExpandWidth = false;
+        vlg.childForceExpandHeight = false;
+
+        var fitter = go.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit   = ContentSizeFitter.FitMode.PreferredSize;
+
         return go;
     }
 
