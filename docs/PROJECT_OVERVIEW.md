@@ -134,17 +134,20 @@ limpieza de jugadores manuales en Arena, `PlayerPrefab = null`, lock de orientac
 - Conexión online vía Relay: funciona (Editor, standalone, WebGL — WebGL con fix aplicado y retesteado en vivo)
 - Lobby: crear sala + join por código, ambiente día/noche sincronizado
 - Colores body/weapon, cámara por jugador, timer, rondas, pantalla de ganadores, nombre real de jugador
-- **Modo solo vs 3 bots** (nuevo, 2026-08-22): botón "Jugar Solo" en el menú, crea sala
-  Relay solo para el host (sigue requiriendo internet — no es offline literal, ver
-  `## Modo Solo vs Bots` más abajo) y spawnea 3 bots server-side con nombres random
-  (`GameManager.BotNamePool`, sin repetir por partida) que van cambiando de color en vivo
-  (timers independientes por bot y por arma/armadura, ~15% de jugada tardía)
-- **Historial de partidas** (nuevo): botón en el menú, cuenta jugadas/ganadas separado
-  para modo solo vs online (`MatchStats.cs`, PlayerPrefs local)
+- **Modo solo vs 3 bots** (nuevo, 2026-08-22, **confirmado funcionando en el build WebGL
+  publicado**): botón "Jugar Solo" en el menú, crea sala Relay solo para el host (sigue
+  requiriendo internet — no es offline literal, ver `## Modo Solo vs Bots` más abajo) y
+  spawnea 3 bots server-side con nombres random (`GameManager.BotNamePool`, sin repetir
+  por partida) que van cambiando de color en vivo (timers independientes por bot y por
+  arma/armadura, ~15% de jugada tardía)
+- **Historial de partidas** (nuevo, **confirmado funcionando**): botón en el menú, cuenta
+  jugadas/ganadas separado para modo solo vs online (`MatchStats.cs`, PlayerPrefs local)
 - **Fix de softlock** (nuevo): si quedan 0-1 jugadores conectados a mitad de partida,
   la partida termina sola y muestra la pantalla de fin con botón "Volver al Menú" (antes
-  se quedaba pegada para siempre — ver pendiente de abajo, ahora resuelto)
-- Build WebGL público y funcionando
+  se quedaba pegada para siempre — ver pendiente de abajo, ahora resuelto). No confirmado
+  en vivo todavía (requiere 2+ clientes reales para probar).
+- Build WebGL público y funcionando — https://alejandrozumbado.github.io/tinted-showdown-build/,
+  redeployado 2026-08-22 con todo lo de arriba (commit build `1d8dd62`, source `8a75f1d`)
 
 **Pendiente / sin confirmar:**
 - Reacomodo manual de decoración en `Arena.unity` (el auto-despeje por radio se quitó,
