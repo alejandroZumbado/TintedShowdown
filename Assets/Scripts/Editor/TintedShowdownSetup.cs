@@ -223,13 +223,13 @@ public static class TintedShowdownSetup
 
     // ─── Android build settings ────────────────────────────────────────────────
 
-    private const string DefaultAndroidPackageName = "com.tintedshowdown.game";
+    private const string DefaultAndroidPackageName = "com.drixwave.tintedshowdown"; // estudio Drixwave (2026-09-23)
 
     private static void SetupAndroidPlayerSettings()
     {
         // Unity refuses to build for Android at all with no applicationIdentifier set.
-        // This is a placeholder — package names are immutable once published to Google
-        // Play, so swap it for your own domain/company before a real release build.
+        // Real package of the Drixwave studio (was the com.tintedshowdown.game
+        // placeholder until 2026-09-23) — immutable once published to Google Play.
         //
         // GetApplicationIdentifier never actually returns empty — if nothing was ever set,
         // it synthesizes "com.DefaultCompany.<ProductName>" on the fly without persisting

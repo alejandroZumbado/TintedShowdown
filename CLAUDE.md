@@ -22,6 +22,7 @@ this `E:\Users\Alejandro\Opal\Tinted Showdown` copy is now the active working co
 
 **Tinted Showdown** — Unity 6000.3.13f1, online 2–4 player FFA color-matching game.
 Platforms: PC, Android, WebGL. Published build: https://alejandrozumbado.github.io/tinted-showdown-build/
+Studio/brand: `companyName` **Drixwave**, Android package **`com.drixwave.tintedshowdown`** (set 2026-09-23; was `DefaultCompany` / placeholder `com.tintedshowdown.game`). Don't change either after a store release: the package is permanent on Google Play and `companyName` is part of the PlayerPrefs save location.
 
 ## Game Rules
 
